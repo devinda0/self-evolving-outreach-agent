@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/index.ts","./src/hooks/usewebsocket.ts","./src/store/campaignstore.ts"],"version":"5.9.3"}

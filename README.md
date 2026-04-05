@@ -80,6 +80,7 @@ self-evolving-outreach-agent/
 
 - Python 3.11+
 - Node 20+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Docker (for local MongoDB)
 - API keys: Gemini, Tavily, Resend, Unipile
 
@@ -105,8 +106,8 @@ docker-compose up mongodb -d
 
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+uv sync
+uv run uvicorn app.main:app --reload
 # → http://localhost:8000
 ```
 
@@ -125,10 +126,10 @@ npm run dev
 cd backend
 
 # Unit tests only (no API keys needed)
-pytest tests/ -m "not integration" -v
+uv run pytest tests/ -m "not integration" -v
 
 # Integration tests (needs MongoDB + USE_MOCK_LLM=true)
-pytest tests/integration/ -m integration -v
+uv run pytest tests/integration/ -m integration -v
 ```
 
 ---
