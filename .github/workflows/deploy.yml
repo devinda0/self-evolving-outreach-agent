@@ -1,1 +1,27 @@
-bmFtZTogRGVwbG95IHRvIFJhaWx3YXkKCm9uOgogIHB1c2g6CiAgICBicmFuY2hlczogW21haW5dCgpqb2JzOgogIGRlcGxveS1iYWNrZW5kOgogICAgbmFtZTogRGVwbG95IGJhY2tlbmQgdG8gUmFpbHdheQogICAgcnVucy1vbjogdWJ1bnR1LWxhdGVzdAogICAgc3RlcHM6CiAgICAgIC0gdXNlczogYWN0aW9ucy9jaGVja291dEB2NAoKICAgICAgLSBuYW1lOiBJbnN0YWxsIFJhaWx3YXkgQ0xJCiAgICAgICAgcnVuOiBucG0gaW5zdGFsbCAtZyBAcmFpbHdheS9jbGkKCiAgICAgIC0gbmFtZTogRGVwbG95IGJhY2tlbmQKICAgICAgICBlbnY6CiAgICAgICAgICBSQUlMV0FZX1RPS0VOOiAke3sgc2VjcmV0cy5SQUlMV0FZX1RPS0VOIH19CiAgICAgICAgcnVuOiB8CiAgICAgICAgICBjZCBiYWNrZW5kCiAgICAgICAgICByYWlsd2F5IHVwIC0tc2VydmljZSBzaWduYWwtdG8tYWN0aW9uLWJhY2tlbmQgLS1kZXRhY2gKCiAgICAgIC0gbmFtZTogSGVhbHRoIGNoZWNrCiAgICAgICAgcnVuOiB8CiAgICAgICAgICBzbGVlcCAxNQogICAgICAgICAgY3VybCAtLWZhaWwgaHR0cHM6Ly9zaWduYWwtdG8tYWN0aW9uLWJhY2tlbmQudXAucmFpbHdheS5hcHAvaGVhbHRoIHx8IGVjaG8gIkhlYWx0aCBjaGVjayBmYWlsZWQg4oCUIGNoZWNrIFJhaWx3YXkgbG9ncyIK
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-backend:
+    name: Deploy backend to Railway
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy backend
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          cd backend
+          railway up --service signal-to-action-backend --detach
+
+      - name: Health check
+        run: |
+          sleep 15
+          curl --fail https://signal-to-action-backend.up.railway.app/health || echo "Health check failed - check Railway logs"

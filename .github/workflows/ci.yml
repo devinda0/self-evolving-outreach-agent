@@ -1,1 +1,66 @@
-bmFtZTogQ0kKCm9uOgogIHB1c2g6CiAgICBicmFuY2hlczogWyIqKiJdCiAgcHVsbF9yZXF1ZXN0OgogICAgYnJhbmNoZXM6IFttYWluXQoKam9iczoKICBiYWNrZW5kOgogICAgbmFtZTogQmFja2VuZCDigJQgbGludCwgdHlwZS1jaGVjaywgdW5pdCB0ZXN0cwogICAgcnVucy1vbjogdWJ1bnR1LWxhdGVzdAogICAgZGVmYXVsdHM6CiAgICAgIHJ1bjoKICAgICAgICB3b3JraW5nLWRpcmVjdG9yeTogYmFja2VuZAogICAgc3RlcHM6CiAgICAgIC0gdXNlczogYWN0aW9ucy9jaGVja291dEB2NAoKICAgICAgLSB1c2VzOiBhY3Rpb25zL3NldHVwLXB5dGhvbkB2NQogICAgICAgIHdpdGg6CiAgICAgICAgICBweXRob24tdmVyc2lvbjogIjMuMTEiCiAgICAgICAgICBjYWNoZTogInBpcCIKICAgICAgICAgIGNhY2hlLWRlcGVuZGVuY3ktcGF0aDogYmFja2VuZC9yZXF1aXJlbWVudHMudHh0CgogICAgICAtIG5hbWU6IEluc3RhbGwgZGVwZW5kZW5jaWVzCiAgICAgICAgcnVuOiBwaXAgaW5zdGFsbCAtciByZXF1aXJlbWVudHMudHh0CgogICAgICAtIG5hbWU6IExpbnQgKHJ1ZmYpCiAgICAgICAgcnVuOiBydWZmIGNoZWNrIGFwcC8gdGVzdHMvIHx8IHRydWUKCiAgICAgIC0gbmFtZTogVHlwZSBjaGVjayAobXlweSkKICAgICAgICBydW46IG15cHkgYXBwLyAtLWlnbm9yZS1taXNzaW5nLWltcG9ydHMgfHwgdHJ1ZQoKICAgICAgLSBuYW1lOiBVbml0IHRlc3RzCiAgICAgICAgcnVuOiBweXRlc3QgdGVzdHMvIC1tICJub3QgaW50ZWdyYXRpb24iIC12IC0tdGI9c2hvcnQKICAgICAgICBlbnY6CiAgICAgICAgICBNT05HT0RCX1VSSTogbW9uZ29kYjovL2xvY2FsaG9zdDoyNzAxNwogICAgICAgICAgREJfTkFNRTogc2lnbmFsX3Rlc3QKICAgICAgICAgIEdFTUlOSV9BUElfS0VZOiB0ZXN0LWtleQogICAgICAgICAgVEFWSUxZX0FQSV9LRVk6IHRlc3Qta2V5CiAgICAgICAgICBSRVNFTkRfQVBJX0tFWTogdGVzdC1rZXkKICAgICAgICAgIFVOSVBJTEVfQVBJX0tFWTogdGVzdC1rZXkKCiAgZnJvbnRlbmQ6CiAgICBuYW1lOiBGcm9udGVuZCDigJQgdHlwZS1jaGVjaywgYnVpbGQKICAgIHJ1bnMtb246IHVidW50dS1sYXRlc3QKICAgIGRlZmF1bHRzOgogICAgICBydW46CiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IGZyb250ZW5kCiAgICBzdGVwczoKICAgICAgLSB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QHY0CgogICAgICAtIHVzZXM6IGFjdGlvbnMvc2V0dXAtbm9kZUB2NAogICAgICAgIHdpdGg6CiAgICAgICAgICBub2RlLXZlcnNpb246ICIyMCIKICAgICAgICAgIGNhY2hlOiAibnBtIgogICAgICAgICAgY2FjaGUtZGVwZW5kZW5jeS1wYXRoOiBmcm9udGVuZC9wYWNrYWdlLWxvY2suanNvbgoKICAgICAgLSBuYW1lOiBJbnN0YWxsIGRlcGVuZGVuY2llcwogICAgICAgIHJ1bjogbnBtIGNpCgogICAgICAtIG5hbWU6IFR5cGUgY2hlY2sKICAgICAgICBydW46IG5weCB0c2MgLS1ub0VtaXQgfHwgdHJ1ZQoKICAgICAgLSBuYW1lOiBCdWlsZAogICAgICAgIHJ1bjogbnBtIHJ1biBidWlsZAo=
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend - lint, type-check, unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check app/ tests/ || true
+
+      - name: Type check (mypy)
+        run: mypy app/ --ignore-missing-imports || true
+
+      - name: Unit tests
+        run: pytest tests/ -m "not integration" -v --tb=short
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          DB_NAME: signal_test
+          GEMINI_API_KEY: test-key
+          TAVILY_API_KEY: test-key
+          RESEND_API_KEY: test-key
+          UNIPILE_API_KEY: test-key
+
+  frontend:
+    name: Frontend - type-check, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit || true
+
+      - name: Build
+        run: npm run build

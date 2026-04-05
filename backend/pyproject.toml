@@ -1,1 +1,18 @@
-W3Rvb2wucnVmZl0KbGluZS1sZW5ndGggPSAxMDAKdGFyZ2V0LXZlcnNpb24gPSAicHkzMTEiCnNlbGVjdCA9IFsiRSIsICJGIiwgIkkiLCAiTiIsICJXIl0KaWdub3JlID0gWyJFNTAxIl0KClt0b29sLm15cHldCnB5dGhvbl92ZXJzaW9uID0gIjMuMTEiCndhcm5fcmV0dXJuX2FueSA9IGZhbHNlCndhcm5fdW51c2VkX2NvbmZpZ3MgPSB0cnVlCmlnbm9yZV9taXNzaW5nX2ltcG9ydHMgPSB0cnVlCgpbdG9vbC5weXRlc3QuaW5pX29wdGlvbnNdCmFzeW5jaW9fbW9kZSA9ICJhdXRvIgptYXJrZXJzID0gWwogICAgImludGVncmF0aW9uOiBtYXJrcyB0ZXN0cyBhcyBpbnRlZ3JhdGlvbiB0ZXN0cyAoZGVzZWxlY3Qgd2l0aCAnLW0gbm90IGludGVncmF0aW9uJykiLApdCnRlc3RwYXRocyA9IFsidGVzdHMiXQo=
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m not integration')",
+]
+testpaths = ["tests"]

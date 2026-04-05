@@ -1,1 +1,31 @@
-dmVyc2lvbjogIjMuOSIKCnNlcnZpY2VzOgogIG1vbmdvZGI6CiAgICBpbWFnZTogbW9uZ286NwogICAgY29udGFpbmVyX25hbWU6IHNpZ25hbF9tb25nbwogICAgcG9ydHM6CiAgICAgIC0gIjI3MDE3OjI3MDE3IgogICAgdm9sdW1lczoKICAgICAgLSBtb25nb19kYXRhOi9kYXRhL2RiCiAgICBlbnZpcm9ubWVudDoKICAgICAgTU9OR09fSU5JVERCX0RBVEFCQVNFOiBzaWduYWxfdG9fYWN0aW9uCgogIGJhY2tlbmQ6CiAgICBidWlsZDogLi9iYWNrZW5kCiAgICBjb250YWluZXJfbmFtZTogc2lnbmFsX2JhY2tlbmQKICAgIHBvcnRzOgogICAgICAtICI4MDAwOjgwMDAiCiAgICBlbnZpcm9ubWVudDoKICAgICAgTU9OR09EQl9VUkk6IG1vbmdvZGI6Ly9tb25nb2RiOjI3MDE3CiAgICAgIERCX05BTUU6IHNpZ25hbF90b19hY3Rpb24KICAgIGVudl9maWxlOgogICAgICAtIC4vYmFja2VuZC8uZW52CiAgICBkZXBlbmRzX29uOgogICAgICAtIG1vbmdvZGIKICAgIHZvbHVtZXM6CiAgICAgIC0gLi9iYWNrZW5kL2FwcDovYXBwL2FwcAogICAgY29tbWFuZDogdXZpY29ybiBhcHAubWFpbjphcHAgLS1ob3N0IDAuMC4wLjAgLS1wb3J0IDgwMDAgLS1yZWxvYWQKCnZvbHVtZXM6CiAgbW9uZ29fZGF0YToK
+version: "3.9"
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: signal_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: signal_to_action
+
+  backend:
+    build: ./backend
+    container_name: signal_backend
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      DB_NAME: signal_to_action
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mongodb
+    volumes:
+      - ./backend/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  mongo_data:
