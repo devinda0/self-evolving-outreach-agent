@@ -24,7 +24,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --extra dev
 
       - name: Lint (ruff)
         run: uv run ruff check app/ tests/ || true
@@ -58,7 +58,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm cache clean --force
+          npm ci
 
       - name: Type check
         run: npx tsc --noEmit || true
