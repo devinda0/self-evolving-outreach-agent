@@ -34,8 +34,8 @@ jobs:
 
       - name: Unit tests
         run: |
-          uv run pytest tests/ -m "not integration" -v --tb=short
-          rc=$?; [ $rc -eq 0 ] || [ $rc -eq 5 ]
+          uv run pytest tests/ -m "not integration" -v --tb=short || rc=$?
+          [ "${rc:-0}" -eq 0 ] || [ "${rc:-0}" -eq 5 ]
         env:
           MONGODB_URI: mongodb://localhost:27017
           DB_NAME: signal_test
