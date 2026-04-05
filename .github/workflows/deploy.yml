@@ -19,12 +19,11 @@ jobs:
         working-directory: backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
         run: |
           railway up \
             --service "signal-to-action-backend" \
             --environment "production" \
-            --project "$RAILWAY_PROJECT_ID" \
+            --project "${{ secrets.RAILWAY_PROJECT_ID }}" \
             --ci
 
       - name: Health check
