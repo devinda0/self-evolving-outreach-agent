@@ -11,11 +11,9 @@ import pytest
 
 from app.agents.graph import (
     build_graph,
-    clarify_node,
     content_agent_node,
     deployment_agent_node,
     feedback_agent_node,
-    orchestrator_node,
     research_dispatcher_node,
     research_fan_out,
     research_synthesizer_node,
@@ -23,6 +21,7 @@ from app.agents.graph import (
     route_from_orchestrator,
     segment_agent_node,
 )
+from app.agents.orchestrator import clarify_node, orchestrator_node
 
 # ---------------------------------------------------------------------------
 # Minimal state helper
@@ -147,7 +146,12 @@ def test_research_fan_out_custom_threads():
 # ---------------------------------------------------------------------------
 
 async def test_orchestrator_node_returns_routing():
-    result = await orchestrator_node(_make_state())
+    """Orchestrator returns routing decision (mock LLM mode returns clarify)."""
+    from unittest.mock import patch
+
+    # Patch _get_llm to return None (mock mode)
+    with patch("app.agents.orchestrator._get_llm", return_value=None):
+        result = await orchestrator_node(_make_state())
     assert result["current_intent"] == "clarify"
     assert result["next_node"] == "clarify"
     assert "clarification_question" in result
@@ -197,6 +201,8 @@ async def test_feedback_agent_node_returns_results():
 async def test_clarify_node_returns_question():
     result = await clarify_node(_make_state())
     assert "clarification_question" in result
+    assert result["active_stage_summary"] == "awaiting clarification"
+    assert "_pending_ui_frames" in result
 
 
 # ---------------------------------------------------------------------------
