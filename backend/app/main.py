@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,11 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.client import close_db, connect_db
 from app.db.crud import create_indexes
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
-    await create_indexes()
+    try:
+        await create_indexes()
+    except Exception as exc:
+        logger.error("Failed to create indexes on startup: %s", exc)
+        raise
     yield
     await close_db()
 
