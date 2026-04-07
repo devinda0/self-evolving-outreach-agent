@@ -7,22 +7,38 @@ interface StubComponentProps {
 
 export default function StubComponent({ frame, onAction }: StubComponentProps) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-        {frame.component ?? "Unknown Component"}
+    <div className="surface-card overflow-hidden">
+      <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border-subtle)", display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--text-muted)" }} />
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
+          {frame.component ?? "Unknown Component"}
+        </span>
       </div>
+
       {frame.props && Object.keys(frame.props).length > 0 && (
-        <pre className="mb-3 max-h-40 overflow-auto rounded bg-gray-50 p-2 text-xs text-gray-700">
+        <pre style={{
+          margin: 0,
+          padding: "12px 16px",
+          maxHeight: "160px",
+          overflow: "auto",
+          fontFamily: "var(--font-mono)",
+          fontSize: "11px",
+          lineHeight: "1.6",
+          color: "var(--text-secondary)",
+          background: "var(--surface-1)",
+          borderBottom: frame.actions.length > 0 ? "1px solid var(--border-subtle)" : "none",
+        }}>
           {JSON.stringify(frame.props, null, 2)}
         </pre>
       )}
+
       {frame.actions.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {frame.actions.map((action) => (
+        <div className="flex flex-wrap gap-2" style={{ padding: "12px 16px" }}>
+          {frame.actions.map((action, i) => (
             <button
               key={action.id}
               type="button"
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              className={i === 0 ? "btn-accent" : "btn-ghost"}
               onClick={() => onAction(frame.instance_id, action.id, action.payload)}
             >
               {action.label}

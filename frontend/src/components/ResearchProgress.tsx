@@ -13,82 +13,133 @@ interface Props {
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
 }
 
-const THREAD_LABELS: Record<string, string> = {
-  competitor: "Competitor",
-  audience: "Audience",
-  channel: "Channel",
-  market: "Market",
+const THREAD_META: Record<string, { label: string; color: string; icon: string }> = {
+  competitor: { label: "Competitor Intel", color: "var(--signal-competitor)", icon: "⬡" },
+  audience:   { label: "Audience Signals", color: "var(--signal-audience)",  icon: "◎" },
+  channel:    { label: "Channel Analysis", color: "var(--signal-channel)",   icon: "◈" },
+  market:     { label: "Market Context",   color: "var(--signal-market)",    icon: "◇" },
 };
 
-const THREAD_ICONS: Record<string, string> = {
-  competitor: "🏢",
-  audience: "👥",
-  channel: "📡",
-  market: "📈",
-};
-
-function StatusIcon({ status }: { status: ThreadStatus }) {
-  switch (status) {
-    case "running":
-      return (
-        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
-      );
-    case "done":
-      return <span className="text-green-400">✓</span>;
-    case "failed":
-      return <span className="text-red-400">✗</span>;
+function StatusIndicator({ status, color }: { status: ThreadStatus; color: string }) {
+  if (status === "running") {
+    return (
+      <span
+        className="inline-block"
+        style={{
+          width: "14px",
+          height: "14px",
+          borderRadius: "50%",
+          border: `2px solid ${color}`,
+          borderTopColor: "transparent",
+          animation: "spin-slow 0.8s linear infinite",
+        }}
+      />
+    );
   }
+  if (status === "done") {
+    return (
+      <span className="animate-fade-in" style={{ color: "var(--success)", fontSize: "14px", lineHeight: 1 }}>✓</span>
+    );
+  }
+  return (
+    <span style={{ color: "var(--danger)", fontSize: "13px", lineHeight: 1 }}>✗</span>
+  );
 }
 
 export default function ResearchProgress({ frame, onAction }: Props) {
   const threads = (frame.props.threads ?? []) as ThreadInfo[];
+  const anyRunning = threads.some((t) => t.status === "running");
 
   return (
-    <div className="rounded-xl bg-gray-900 text-gray-100 shadow-lg">
-      <div className="border-b border-gray-700 px-5 py-3">
-        <h3 className="text-sm font-semibold tracking-wide">Research in Progress</h3>
+    <div
+      className="surface-card overflow-hidden"
+      style={{
+        boxShadow: anyRunning ? "0 0 30px rgba(0,212,170,0.06)" : undefined,
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: "12px 20px",
+          borderBottom: "1px solid var(--border-subtle)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        {anyRunning && (
+          <span
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: "var(--accent)",
+              display: "inline-block",
+              animation: "typing-pulse 1.5s ease-in-out infinite",
+            }}
+          />
+        )}
+        <span style={{ fontFamily: "var(--font-display)", fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>
+          {anyRunning ? "Research in Progress" : "Research Complete"}
+        </span>
       </div>
 
-      <div className="divide-y divide-gray-800 px-5">
-        {threads.map((t) => (
-          <div key={t.type} className="flex items-center justify-between py-3">
-            <div className="flex items-center gap-2.5">
-              <span className="text-base">{THREAD_ICONS[t.type] ?? "🔍"}</span>
-              <span className="text-sm font-medium">
-                {THREAD_LABELS[t.type] ?? t.type}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              {t.status === "done" && t.finding_count > 0 && (
-                <span className="text-xs text-gray-400">
-                  {t.finding_count} finding{t.finding_count !== 1 ? "s" : ""}
+      {/* Thread rows */}
+      <div style={{ padding: "4px 0" }}>
+        {threads.map((t, i) => {
+          const meta = THREAD_META[t.type] ?? { label: t.type, color: "var(--text-muted)", icon: "○" };
+          return (
+            <div
+              key={t.type}
+              className="flex items-center justify-between"
+              style={{
+                padding: "10px 20px",
+                borderBottom: i < threads.length - 1 ? "1px solid var(--border-subtle)" : "none",
+                animation: `fade-in 0.3s ease-out ${i * 0.08}s both`,
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <span style={{ fontSize: "14px", color: meta.color, opacity: 0.8 }}>{meta.icon}</span>
+                <span style={{ fontSize: "12.5px", fontWeight: 500, color: "var(--text-primary)" }}>
+                  {meta.label}
                 </span>
-              )}
-              {t.status === "failed" ? (
-                <button
-                  type="button"
-                  className="rounded bg-red-500/20 px-2 py-0.5 text-xs text-red-300 hover:bg-red-500/30 transition-colors"
-                  onClick={() =>
-                    onAction(frame.instance_id, `retry_${t.type}`, { thread_type: t.type })
-                  }
-                >
-                  Retry
-                </button>
-              ) : null}
-              <StatusIcon status={t.status} />
+              </div>
+
+              <div className="flex items-center gap-3">
+                {t.status === "done" && t.finding_count > 0 && (
+                  <span style={{ fontSize: "10px", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+                    {t.finding_count} signal{t.finding_count !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {t.status === "failed" && (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{
+                      padding: "3px 8px",
+                      fontSize: "10px",
+                      color: "var(--danger)",
+                      borderColor: "rgba(255,77,106,0.2)",
+                    }}
+                    onClick={() => onAction(frame.instance_id, `retry_${t.type}`, { thread_type: t.type })}
+                  >
+                    Retry
+                  </button>
+                )}
+                <StatusIndicator status={t.status} color={meta.color} />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {frame.actions.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-t border-gray-700 px-5 py-3">
-          {frame.actions.map((action) => (
+        <div className="flex flex-wrap gap-2" style={{ padding: "12px 20px", borderTop: "1px solid var(--border-subtle)" }}>
+          {frame.actions.map((action, i) => (
             <button
               key={action.id}
               type="button"
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              className={i === 0 ? "btn-accent" : "btn-ghost"}
               onClick={() => onAction(frame.instance_id, action.id, action.payload)}
             >
               {action.label}

@@ -10,20 +10,27 @@ export default function ClarificationPrompt({ frame, onAction }: Props) {
   const options = (frame.props.options as string[]) ?? [];
 
   return (
-    <div className="rounded-xl bg-gray-900 text-gray-100 shadow-lg">
-      <div className="px-5 py-4">
-        <p className="text-sm leading-relaxed text-gray-200">{question}</p>
+    <div className="surface-card overflow-hidden">
+      {/* Question */}
+      <div style={{ padding: "14px 20px", borderBottom: options.length > 0 || frame.actions.length > 0 ? "1px solid var(--border-subtle)" : "none" }}>
+        <div className="flex items-start gap-2.5">
+          <span style={{ color: "var(--warning)", fontSize: "12px", marginTop: "2px" }}>?</span>
+          <p style={{ fontSize: "13px", lineHeight: "1.65", color: "var(--text-primary)" }}>
+            {question}
+          </p>
+        </div>
       </div>
 
+      {/* Options */}
       {options.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-t border-gray-700 px-5 py-3">
+        <div className="flex flex-wrap gap-2" style={{ padding: "12px 20px" }}>
           {options.map((option, i) => {
             const matchingAction = frame.actions[i];
             return (
               <button
                 key={i}
                 type="button"
-                className="rounded-md border border-gray-600 bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-indigo-500 hover:bg-gray-700 transition-colors"
+                className="btn-ghost"
                 onClick={() => {
                   if (matchingAction) {
                     onAction(frame.instance_id, matchingAction.id, matchingAction.payload);
@@ -39,14 +46,14 @@ export default function ClarificationPrompt({ frame, onAction }: Props) {
         </div>
       )}
 
-      {/* Render any extra actions not covered by options */}
+      {/* Extra actions beyond options */}
       {frame.actions.length > options.length && (
-        <div className="flex flex-wrap gap-2 border-t border-gray-700 px-5 py-3">
+        <div className="flex flex-wrap gap-2" style={{ padding: "12px 20px", borderTop: options.length > 0 ? "1px solid var(--border-subtle)" : "none" }}>
           {frame.actions.slice(options.length).map((action) => (
             <button
               key={action.id}
               type="button"
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              className="btn-accent"
               onClick={() => onAction(frame.instance_id, action.id, action.payload)}
             >
               {action.label}
