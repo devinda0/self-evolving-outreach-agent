@@ -79,7 +79,7 @@ export default function MessageRenderer({ message, onAction }: MessageRendererPr
 
   if (message.uiComponent) {
     return (
-      <div className="my-3 animate-fade-in-up">
+      <div style={{ padding: "8px 0" }} className="animate-fade-in-up">
         <UIComponentDispatcher frame={message.uiComponent} onAction={onAction} />
       </div>
     );
@@ -87,12 +87,16 @@ export default function MessageRenderer({ message, onAction }: MessageRendererPr
 
   return (
     <div
-      className={`my-1.5 flex ${isUser ? "justify-end" : "justify-start"}`}
-      style={{ animation: isUser ? "slide-in-right 0.3s ease-out both" : "slide-in-left 0.3s ease-out both" }}
+      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+      style={{
+        padding: "4px 0",
+        animation: isUser ? "slide-in-right 0.3s ease-out both" : "slide-in-left 0.3s ease-out both",
+      }}
     >
       <div
-        className="max-w-lg whitespace-pre-wrap"
+        className="whitespace-pre-wrap"
         style={{
+          maxWidth: isUser ? "75%" : "85%",
           padding: "10px 14px",
           fontSize: "13px",
           lineHeight: "1.6",

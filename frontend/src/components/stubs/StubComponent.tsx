@@ -25,7 +25,7 @@ export default function StubComponent({ frame, onAction }: StubComponentProps) {
           fontSize: "11px",
           lineHeight: "1.6",
           color: "var(--text-secondary)",
-          background: "var(--surface-1)",
+          background: "var(--bg-surface-1)",
           borderBottom: frame.actions.length > 0 ? "1px solid var(--border-subtle)" : "none",
         }}>
           {JSON.stringify(frame.props, null, 2)}

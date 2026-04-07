@@ -223,7 +223,7 @@ function ChatThread() {
     <div className="flex h-screen flex-col" style={{ background: "var(--bg-base)" }}>
       {/* Header */}
       <header
-        className="flex items-center justify-between px-5 py-3"
+        className="flex shrink-0 items-center justify-between px-5 py-3"
         style={{
           background: "var(--bg-surface-1)",
           borderBottom: "1px solid var(--border-subtle)",
@@ -277,7 +277,7 @@ function ChatThread() {
         className="flex-1 overflow-y-auto px-4 py-5"
         style={{ background: "var(--bg-base)" }}
       >
-        <div className="mx-auto max-w-2xl space-y-1">
+        <div className="mx-auto max-w-2xl">
           {messages.map((msg) => (
             <MessageRenderer key={msg.id} message={msg} onAction={sendUIAction} />
           ))}
@@ -296,7 +296,7 @@ function ChatThread() {
       </div>
 
       {/* Input bar */}
-      <div style={{ background: "var(--bg-surface-1)", borderTop: "1px solid var(--border-subtle)" }}>
+      <div className="shrink-0" style={{ background: "var(--bg-surface-1)", borderTop: "1px solid var(--border-subtle)" }}>
         <form
           onSubmit={handleSend}
           className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-3"
