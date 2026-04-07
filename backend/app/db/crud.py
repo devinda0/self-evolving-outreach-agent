@@ -11,8 +11,10 @@ from app.db.collections import (
     CONTENT_VARIANTS,
     DEPLOYMENT_RECORDS,
     FEEDBACK_EVENTS,
+    PROSPECT_CARDS,
     QUARANTINE,
     RESEARCH_FINDINGS,
+    SEGMENTS,
     TOOL_CACHE,
 )
 
@@ -131,6 +133,58 @@ async def save_quarantine_event(event: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Segments
+# ---------------------------------------------------------------------------
+
+async def save_segments(session_id: str, segments: list[dict[str, Any]]) -> None:
+    """Replace all segments for a session."""
+    db = get_db()
+    await db[SEGMENTS].delete_many({"session_id": session_id})
+    if segments:
+        for seg in segments:
+            seg["session_id"] = session_id
+        await db[SEGMENTS].insert_many(segments)
+
+
+async def get_segments(session_id: str) -> list[dict[str, Any]]:
+    """Return all segments for a session."""
+    db = get_db()
+    cursor = db[SEGMENTS].find({"session_id": session_id})
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Prospect cards
+# ---------------------------------------------------------------------------
+
+async def save_prospect_cards(session_id: str, cards: list[dict[str, Any]]) -> None:
+    """Replace all prospect cards for a session."""
+    db = get_db()
+    await db[PROSPECT_CARDS].delete_many({"session_id": session_id})
+    if cards:
+        for card in cards:
+            card["session_id"] = session_id
+        await db[PROSPECT_CARDS].insert_many(cards)
+
+
+async def get_prospect_cards(session_id: str) -> list[dict[str, Any]]:
+    """Return all scored prospect cards for a session, sorted by combined score desc."""
+    db = get_db()
+    cursor = db[PROSPECT_CARDS].find({"session_id": session_id}).sort(
+        [("fit_score", DESCENDING), ("urgency_score", DESCENDING)]
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Tool cache
 # ---------------------------------------------------------------------------
 
@@ -173,6 +227,10 @@ async def create_indexes() -> None:
     await db[DEPLOYMENT_RECORDS].create_index("provider_message_id")
     await db[FEEDBACK_EVENTS].create_index("dedupe_key", unique=True)
     await db[TOOL_CACHE].create_index("expires_at", expireAfterSeconds=0)
+    await db[SEGMENTS].create_index("session_id")
+    await db[PROSPECT_CARDS].create_index(
+        [("session_id", ASCENDING), ("fit_score", DESCENDING)]
+    )
 
 
 # ---------------------------------------------------------------------------

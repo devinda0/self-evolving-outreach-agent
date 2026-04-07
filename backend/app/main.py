@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import campaign, health, webhooks
+from app.api import campaign, health, prospects, webhooks
 from app.db.client import close_db, connect_db
 from app.db.crud import create_indexes
 
@@ -42,3 +42,4 @@ app.add_middleware(
 app.include_router(campaign.router)
 app.include_router(webhooks.router)
 app.include_router(health.router)
+app.include_router(prospects.router)
