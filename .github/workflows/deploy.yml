@@ -30,15 +30,17 @@ jobs:
         env:
           BACKEND_URL: ${{ secrets.RAILWAY_BACKEND_URL }}
         run: |
-          echo "Waiting for service to become healthy..."
-          for i in $(seq 1 12); do
+          echo "Waiting 30s for container to start..."
+          sleep 30
+          echo "Polling health endpoint..."
+          for i in $(seq 1 15); do
             status=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/health" || true)
             if [ "$status" = "200" ]; then
               echo "Health check passed (attempt $i)"
               exit 0
             fi
-            echo "Attempt $i: got HTTP $status, retrying in 10s..."
-            sleep 10
+            echo "Attempt $i: got HTTP $status, retrying in 15s..."
+            sleep 15
           done
-          echo "Health check failed after 120s"
+          echo "Health check failed after 255s"
           exit 1
