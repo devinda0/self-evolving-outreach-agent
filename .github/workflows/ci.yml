@@ -42,6 +42,47 @@ jobs:
           RESEND_API_KEY: test-key
           UNIPILE_API_KEY: test-key
 
+  integration:
+    name: Backend - integration tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      mongodb:
+        image: mongo:6
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Integration tests
+        run: uv run pytest tests/integration/ -m integration -v --tb=short
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          DB_NAME: signal_test
+          GEMINI_API_KEY: test-key
+          TAVILY_API_KEY: test-key
+          RESEND_API_KEY: test-key
+          UNIPILE_API_KEY: test-key
+
   frontend:
     name: Frontend - type-check, build
     runs-on: ubuntu-latest
