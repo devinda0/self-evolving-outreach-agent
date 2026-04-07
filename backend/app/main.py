@@ -16,8 +16,9 @@ async def lifespan(app: FastAPI):
     try:
         await create_indexes()
     except Exception as exc:
-        logger.error("Failed to create indexes on startup: %s", exc)
-        raise
+        # Log but do not crash — missing indexes degrade performance, not correctness.
+        # The app must still start so Railway's health check passes.
+        logger.warning("Could not create indexes on startup (will retry later): %s", exc)
     yield
     await close_db()
 
