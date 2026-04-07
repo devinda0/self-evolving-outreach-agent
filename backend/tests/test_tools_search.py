@@ -9,14 +9,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from app.tools.research_policy import DEFAULT_RESEARCH_POLICY
 from app.tools.search import (
     extract_page,
     search_community,
     search_news,
     search_web,
 )
-from app.tools.research_policy import DEFAULT_RESEARCH_POLICY
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
