@@ -24,16 +24,18 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv pip install -e ".[dev]"
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: uv run ruff check app/ tests/
+        run: .venv/bin/ruff check app/ tests/
 
       - name: Type check (mypy)
-        run: uv run mypy app/ --ignore-missing-imports
+        run: .venv/bin/mypy app/ --ignore-missing-imports
 
       - name: Unit tests
-        run: uv run pytest tests/ -m "not integration" -v --tb=short
+        run: .venv/bin/pytest tests/ -m "not integration" -v --tb=short
         env:
           MONGODB_URI: mongodb://localhost:27017
           DB_NAME: signal_test
@@ -71,10 +73,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv pip install -e ".[dev]"
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
 
       - name: Integration tests
-        run: uv run pytest tests/integration/ -m integration -v --tb=short
+        run: .venv/bin/pytest tests/integration/ -m integration -v --tb=short
         env:
           MONGODB_URI: mongodb://localhost:27017
           DB_NAME: signal_test
