@@ -4,9 +4,10 @@ Requires a running MongoDB instance.
 Run with: pytest -m integration
 """
 
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from starlette.testclient import TestClient
 
 from app.db.client import close_db, connect_db, get_db
 from app.db.crud import create_indexes
@@ -144,20 +145,57 @@ async def test_health():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_websocket_echo():
-    """Connect via WS, send a user message, and verify at least one JSON frame returns."""
-    client = TestClient(app)
+async def test_websocket_echo():
+    """Connect via WS, send a user message, and verify at least one typed frame returns.
 
-    with client.websocket_connect("/ws/campaign/ws-test-001") as ws:
-        ws.send_json({"type": "user_message", "content": "Hello, agent!"})
+    Uses the ASGI interface directly so everything runs in the same pytest-asyncio
+    event loop — avoids the Motor cross-loop error that occurs with Starlette's sync
+    TestClient.
+    """
+    scope = {
+        "type": "websocket",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "headers": [],
+        "path": "/ws/campaign/ws-test-001",
+        "query_string": b"",
+        "root_path": "",
+        "scheme": "ws",
+        "server": ("localhost", 8000),
+        "client": ("127.0.0.1", 8000),
+    }
 
-        # Should receive at least one frame
-        frames = []
-        for _ in range(2):
-            frame = ws.receive_json()
-            frames.append(frame)
+    # Ordered ASGI messages the simulated client delivers to the app.
+    client_messages = [
+        {"type": "websocket.connect"},
+        {
+            "type": "websocket.receive",
+            "text": json.dumps({"type": "user_message", "content": "Hello, agent!"}),
+        },
+        # Disconnect after the message — triggers WebSocketDisconnect in the handler.
+        {"type": "websocket.disconnect", "code": 1000},
+    ]
+    idx = 0
+    app_frames: list[dict] = []
 
-        assert len(frames) >= 1
-        # One should be a progress frame, the other a token echo
-        types = {f["type"] for f in frames}
-        assert "token" in types or "progress" in types
+    async def receive() -> dict:
+        nonlocal idx
+        if idx < len(client_messages):
+            msg = client_messages[idx]
+            idx += 1
+            return msg
+        return {"type": "websocket.disconnect", "code": 1000}
+
+    async def send(message: dict) -> None:
+        app_frames.append(message)
+
+    await app(scope, receive, send)
+
+    sent_frames = [
+        json.loads(m["text"])
+        for m in app_frames
+        if m.get("type") == "websocket.send" and "text" in m
+    ]
+    assert len(sent_frames) >= 1
+    types = {f.get("type") for f in sent_frames}
+    assert "token" in types or "progress" in types
