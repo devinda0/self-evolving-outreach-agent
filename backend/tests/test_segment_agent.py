@@ -1,7 +1,5 @@
 """Tests for the segment agent — segment derivation, prospect loading, scoring, and UI frames."""
 
-import pytest
-
 from app.agents.segment_agent import (
     DEMO_SEED_PROSPECTS,
     build_prospect_card,
@@ -17,7 +15,6 @@ from app.agents.segment_agent import (
     score_prospects,
 )
 from app.models.prospect import Segment
-
 
 # ---------------------------------------------------------------------------
 # Minimal helpers
@@ -89,7 +86,7 @@ class TestDeriveSegments:
             product_name="TestProd",
         )
         labels = [s.label for s in segments]
-        assert any("pain" in l.lower() or "Pain" in l for l in labels)
+        assert any("pain" in lbl.lower() or "Pain" in lbl for lbl in labels)
 
     async def test_competitor_signal_creates_displacement_segment(self):
         findings = _make_findings(2, "competitor")
@@ -99,7 +96,7 @@ class TestDeriveSegments:
             product_name="TestProd",
         )
         labels = [s.label for s in segments]
-        assert any("competitive" in l.lower() or "displacement" in l.lower() for l in labels)
+        assert any("competitive" in lbl.lower() or "displacement" in lbl.lower() for lbl in labels)
 
     async def test_mixed_signals(self):
         findings = [

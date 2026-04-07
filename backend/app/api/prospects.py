@@ -20,6 +20,7 @@ from app.db.crud import (
     save_prospect_cards,
     save_segments,
 )
+from app.models.prospect import Segment
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,6 @@ async def import_prospects(session_id: str, file: UploadFile) -> dict[str, Any]:
     # Derive segments if none exist yet
     segments_data = await get_segments(session_id)
     if not segments_data:
-        from app.models.prospect import Segment
-
         segments = await derive_segments(
             briefing_summary=state.get("briefing_summary"),
             research_findings=state.get("research_findings", []),
@@ -75,9 +74,7 @@ async def import_prospects(session_id: str, file: UploadFile) -> dict[str, Any]:
         segments_data = [s.model_dump() for s in segments]
 
     # Score prospects
-    from app.models.prospect import Segment as SegmentModel
-
-    segments_obj = [SegmentModel(**s) for s in segments_data]
+    segments_obj = [Segment(**s) for s in segments_data]
     top_findings = state.get("research_findings", [])[:5]
     scored = await score_prospects(raw_prospects, segments_obj, top_findings)
     cards = [build_prospect_card(p) for p in scored]

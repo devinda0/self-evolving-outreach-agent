@@ -15,9 +15,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from app.db.crud import save_segments, save_prospect_cards
+from app.db.crud import save_prospect_cards, save_segments
 from app.models.campaign_state import CampaignState
-from app.models.prospect import Prospect, Segment
+from app.models.prospect import Segment
 from app.models.ui_frames import UIAction, UIFrame
 
 logger = logging.getLogger(__name__)
@@ -421,9 +421,9 @@ async def segment_agent_node(state: CampaignState) -> dict:
     await save_segments(session_id, [s.model_dump() for s in segments])
     await save_prospect_cards(session_id, scored)
 
-    # Step 6: Build UI frames
-    seg_frame = build_segment_selector_frame(segments, f"seg-selector-{session_id[:8]}")
-    picker_frame = build_prospect_picker_frame(cards, f"prospect-picker-{session_id[:8]}")
+    # Step 6: Build UI frames (built for future WS streaming; not yet wired into state)
+    build_segment_selector_frame(segments, f"seg-selector-{session_id[:8]}")
+    build_prospect_picker_frame(cards, f"prospect-picker-{session_id[:8]}")
 
     logger.info(
         "segment_agent_node completed | session=%s segments=%d prospects=%d",

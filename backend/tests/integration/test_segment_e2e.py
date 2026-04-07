@@ -6,9 +6,6 @@ verify scoring → CSV import → segment selection — all against a real Mongo
 Run with: pytest -m integration tests/integration/test_segment_e2e.py -v
 """
 
-import io
-import json
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -23,7 +20,6 @@ from app.db.crud import (
     get_segments,
     load_campaign_state,
     save_campaign_state,
-    save_prospect_cards,
     save_segments,
 )
 from app.main import app
@@ -196,8 +192,6 @@ async def test_e2e_segment_agent_full_flow():
     # Cards should be sorted by score (descending)
     if len(db_cards) > 1:
         for i in range(len(db_cards) - 1):
-            current_total = db_cards[i]["fit_score"] + db_cards[i].get("urgency_score", 0)
-            next_total = db_cards[i + 1]["fit_score"] + db_cards[i + 1].get("urgency_score", 0)
             # DB sort is by fit_score desc, urgency_score desc (not combined)
             # Just verify they have valid scores
             assert db_cards[i]["fit_score"] >= 0.0
