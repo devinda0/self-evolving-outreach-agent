@@ -27,15 +27,13 @@ jobs:
         run: uv sync --extra dev
 
       - name: Lint (ruff)
-        run: uv run ruff check app/ tests/ || true
+        run: uv run ruff check app/ tests/
 
       - name: Type check (mypy)
-        run: uv run mypy app/ --ignore-missing-imports || true
+        run: uv run mypy app/ --ignore-missing-imports
 
       - name: Unit tests
-        run: |
-          uv run pytest tests/ -m "not integration" -v --tb=short || rc=$?
-          [ "${rc:-0}" -eq 0 ] || [ "${rc:-0}" -eq 5 ]
+        run: uv run pytest tests/ -m "not integration" -v --tb=short
         env:
           MONGODB_URI: mongodb://localhost:27017
           DB_NAME: signal_test
@@ -65,7 +63,7 @@ jobs:
           npm ci
 
       - name: Type check
-        run: npx tsc --noEmit || true
+        run: npx tsc --noEmit
 
       - name: Build
         run: npm run build

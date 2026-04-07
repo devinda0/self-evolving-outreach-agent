@@ -8,6 +8,7 @@ Real agent logic will replace these stubs in later issues.
 import logging
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
@@ -158,7 +159,7 @@ async def clarify_node(state: CampaignState) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def build_graph(checkpointer: MongoDBSaver | None = None) -> StateGraph:
+def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     """Build and compile the full LangGraph state machine.
 
     Args:
@@ -166,7 +167,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> StateGraph:
             compiled without persistence (useful for tests).
 
     Returns:
-        A compiled LangGraph ``StateGraph``.
+        A compiled LangGraph ``CompiledStateGraph``.
     """
     builder = StateGraph(CampaignState)
 

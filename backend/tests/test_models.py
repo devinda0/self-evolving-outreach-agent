@@ -16,7 +16,6 @@ from app.models import (
     UIFrame,
 )
 
-
 NOW = datetime.now(tz=timezone.utc)
 
 

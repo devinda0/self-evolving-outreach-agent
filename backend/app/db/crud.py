@@ -11,12 +11,10 @@ from app.db.collections import (
     CONTENT_VARIANTS,
     DEPLOYMENT_RECORDS,
     FEEDBACK_EVENTS,
-    INTELLIGENCE_ENTRIES,
     QUARANTINE,
     RESEARCH_FINDINGS,
     TOOL_CACHE,
 )
-
 
 # ---------------------------------------------------------------------------
 # Campaign sessions

@@ -24,7 +24,6 @@ from app.agents.graph import (
     segment_agent_node,
 )
 
-
 # ---------------------------------------------------------------------------
 # Minimal state helper
 # ---------------------------------------------------------------------------
@@ -228,7 +227,7 @@ async def test_graph_invoke_returns_updated_state():
 async def test_graph_research_route():
     """Verify research routing fans out to 4 threads and synthesizes."""
     # Build graph without checkpointer
-    graph = build_graph(checkpointer=None)
+    build_graph(checkpointer=None)
 
     # Override orchestrator to route to research on first call, then END
     # We do this by pre-setting next_node in state
