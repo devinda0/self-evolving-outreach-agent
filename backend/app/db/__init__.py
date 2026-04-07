@@ -1,0 +1,55 @@
+"""Database package — async MongoDB client, collection constants, and CRUD layer."""
+
+from app.db.client import close_db, connect_db, get_db
+from app.db.collections import (
+    CAMPAIGN_SESSIONS,
+    CONTENT_VARIANTS,
+    DEPLOYMENT_RECORDS,
+    FEEDBACK_EVENTS,
+    INTELLIGENCE_ENTRIES,
+    QUARANTINE,
+    RESEARCH_FINDINGS,
+    TOOL_CACHE,
+)
+from app.db.crud import (
+    cache_tool_result,
+    create_indexes,
+    get_cached_tool_result,
+    get_deployment_by_provider_message_id,
+    get_top_findings,
+    get_variants_for_session,
+    load_campaign_state,
+    save_campaign_state,
+    save_content_variant,
+    save_deployment_record,
+    save_feedback_event,
+    save_quarantine_event,
+    save_research_finding,
+)
+
+__all__ = [
+    "close_db",
+    "connect_db",
+    "get_db",
+    "create_indexes",
+    "CAMPAIGN_SESSIONS",
+    "CONTENT_VARIANTS",
+    "DEPLOYMENT_RECORDS",
+    "FEEDBACK_EVENTS",
+    "INTELLIGENCE_ENTRIES",
+    "QUARANTINE",
+    "RESEARCH_FINDINGS",
+    "TOOL_CACHE",
+    "cache_tool_result",
+    "get_cached_tool_result",
+    "get_deployment_by_provider_message_id",
+    "get_top_findings",
+    "get_variants_for_session",
+    "load_campaign_state",
+    "save_campaign_state",
+    "save_content_variant",
+    "save_deployment_record",
+    "save_feedback_event",
+    "save_quarantine_event",
+    "save_research_finding",
+]

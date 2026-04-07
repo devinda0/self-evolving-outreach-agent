@@ -1,0 +1,10 @@
+"""MongoDB collection name constants."""
+
+CAMPAIGN_SESSIONS = "campaign_sessions"
+RESEARCH_FINDINGS = "research_findings"
+CONTENT_VARIANTS = "content_variants"
+DEPLOYMENT_RECORDS = "deployment_records"
+FEEDBACK_EVENTS = "feedback_events"
+INTELLIGENCE_ENTRIES = "intelligence_entries"
+TOOL_CACHE = "tool_cache"
+QUARANTINE = "quarantine_events"
