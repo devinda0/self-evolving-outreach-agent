@@ -13,6 +13,11 @@ from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
 from app.agents.orchestrator import clarify_node, orchestrator_node
+from app.agents.research import (
+    research_dispatcher_node,
+    research_synthesizer_node,
+    research_thread_node,
+)
 from app.agents.segment_agent import segment_agent_node
 from app.db.client import get_db
 from app.models.campaign_state import CampaignState
@@ -57,46 +62,6 @@ def research_fan_out(state: CampaignState) -> list[Send]:
 # ---------------------------------------------------------------------------
 # Stub node implementations (will be replaced by real agents in later issues)
 # ---------------------------------------------------------------------------
-
-
-async def research_dispatcher_node(state: CampaignState) -> dict:
-    """STUB: prepare the thread list for fan-out."""
-    logger.info("research_dispatcher_node called | session=%s", state.get("session_id"))
-    return {
-        "active_thread_types": ["competitor", "audience", "channel", "market"],
-    }
-
-
-async def research_thread_node(state: CampaignState) -> dict:
-    """STUB: single research thread — returns a placeholder finding."""
-    thread_type = state.get("thread_type", "unknown")
-    logger.info(
-        "research_thread_node called | session=%s thread=%s",
-        state.get("session_id"),
-        thread_type,
-    )
-    return {
-        "research_findings": [
-            {
-                "claim": f"Stub finding from {thread_type} thread",
-                "confidence": 0.5,
-                "thread_type": thread_type,
-            }
-        ],
-    }
-
-
-async def research_synthesizer_node(state: CampaignState) -> dict:
-    """STUB: merge thread findings into a briefing summary."""
-    findings_count = len(state.get("research_findings", []))
-    logger.info(
-        "research_synthesizer_node called | session=%s findings=%d",
-        state.get("session_id"),
-        findings_count,
-    )
-    return {
-        "briefing_summary": f"Stub briefing summary — synthesized {findings_count} findings",
-    }
 
 
 async def content_agent_node(state: CampaignState) -> dict:
