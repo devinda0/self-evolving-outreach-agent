@@ -32,6 +32,7 @@ class ContentVariant(BaseModel):
     subject_line: Optional[str] = None
     body: str
     cta: str
+    angle_label: Optional[str] = None
     created_at: datetime
 
 

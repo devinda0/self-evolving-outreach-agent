@@ -12,6 +12,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
+from app.agents.content_agent import content_agent_node
 from app.agents.orchestrator import clarify_node, orchestrator_node
 from app.agents.research import (
     research_dispatcher_node,
@@ -63,16 +64,6 @@ def research_fan_out(state: CampaignState) -> list[Send]:
 # Stub node implementations (will be replaced by real agents in later issues)
 # ---------------------------------------------------------------------------
 
-
-async def content_agent_node(state: CampaignState) -> dict:
-    """STUB: generate content variants."""
-    logger.info("content_agent_node called | session=%s", state.get("session_id"))
-    return {
-        "content_variants": [
-            {"id": "var-stub-1", "body": "Stub variant A"},
-            {"id": "var-stub-2", "body": "Stub variant B"},
-        ],
-    }
 
 
 async def deployment_agent_node(state: CampaignState) -> dict:
