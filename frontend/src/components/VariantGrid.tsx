@@ -37,6 +37,15 @@ const ANGLE_COLORS: Record<string, string> = {
   "strategic-vision":"#74c0fc",
 };
 
+const FINDING_CHIP_COLORS = [
+  "var(--signal-competitor)",
+  "var(--signal-audience)",
+  "var(--signal-channel)",
+  "var(--signal-market)",
+  "#cc5de8",
+  "#74c0fc",
+];
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -106,6 +115,27 @@ function MetricBadge({ metric }: { metric: string }) {
   );
 }
 
+function FindingChip({ findingId, index }: { findingId: string; index: number }) {
+  const color = FINDING_CHIP_COLORS[index % FINDING_CHIP_COLORS.length];
+  return (
+    <span
+      style={{
+        fontSize: "9.5px",
+        fontFamily: "var(--font-mono)",
+        fontWeight: 600,
+        color,
+        background: `${color}14`,
+        border: `1px solid ${color}30`,
+        borderRadius: "3px",
+        padding: "1px 6px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      Finding #{findingId.slice(-4) || findingId}
+    </span>
+  );
+}
+
 function BodyPreview({ text, expanded }: { text: string; expanded: boolean }) {
   const preview = expanded ? text : text.slice(0, 180) + (text.length > 180 ? "…" : "");
   return (
@@ -124,6 +154,78 @@ function BodyPreview({ text, expanded }: { text: string; expanded: boolean }) {
   );
 }
 
+function ABSplitIndicator({ selectedCount }: { selectedCount: number }) {
+  if (selectedCount < 2) return null;
+
+  const pct = Math.round(100 / selectedCount);
+  const labels = Array.from({ length: selectedCount }, (_, i) =>
+    String.fromCharCode(65 + i)
+  );
+
+  return (
+    <div
+      style={{
+        margin: "0 16px",
+        padding: "10px 14px",
+        background: "var(--bg-surface-3)",
+        borderRadius: "var(--radius-sm)",
+        border: "1px solid var(--border-subtle)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "9px",
+          fontWeight: 700,
+          fontFamily: "var(--font-mono)",
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          color: "var(--accent)",
+          marginBottom: "8px",
+        }}
+      >
+        A/B Split Plan
+      </div>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+        {labels.map((label, i) => (
+          <div
+            key={label}
+            style={{
+              flex: 1,
+              height: "4px",
+              borderRadius: "2px",
+              background: FINDING_CHIP_COLORS[i % FINDING_CHIP_COLORS.length],
+              opacity: 0.7,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+        {labels.map((label, i) => (
+          <span
+            key={label}
+            style={{
+              fontSize: "11px",
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span
+              style={{
+                fontWeight: 700,
+                color: FINDING_CHIP_COLORS[i % FINDING_CHIP_COLORS.length],
+              }}
+            >
+              Variant {label}
+            </span>
+            {" → "}
+            {pct}% of prospects
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -133,8 +235,12 @@ export default function VariantGrid({ frame, onAction }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const deployAction = frame.actions.find(
-    (a: UIAction) => a.action_type === "deploy_variants" || a.id === "deploy-selected"
+  const confirmAction = frame.actions.find(
+    (a: UIAction) =>
+      a.action_type === "confirm_variants" ||
+      a.action_type === "deploy_variants" ||
+      a.id === "confirm-selected" ||
+      a.id === "deploy-selected"
   );
 
   function toggleSelect(id: string) {
@@ -163,12 +269,20 @@ export default function VariantGrid({ frame, onAction }: Props) {
     setSelected(new Set());
   }
 
-  function handleDeploy() {
-    if (!deployAction || selected.size === 0) return;
-    onAction(frame.instance_id, deployAction.id, {
-      ...deployAction.payload,
-      selected_variant_ids: Array.from(selected),
-    });
+  function handleConfirm() {
+    if (selected.size === 0) return;
+    const ids = Array.from(selected);
+    if (confirmAction) {
+      onAction(frame.instance_id, confirmAction.id, {
+        ...confirmAction.payload,
+        variant_ids: ids,
+      });
+    } else {
+      onAction(frame.instance_id, "confirm_variants", {
+        action: "confirm_variants",
+        variant_ids: ids,
+      });
+    }
   }
 
   if (variants.length === 0) {
@@ -180,11 +294,15 @@ export default function VariantGrid({ frame, onAction }: Props) {
   }
 
   return (
-    <div className="surface-card overflow-hidden">
+    <div
+      className="surface-card overflow-hidden"
+      style={{ boxShadow: "0 0 40px rgba(0,212,170,0.04), 0 4px 24px rgba(0,0,0,0.3)" }}
+    >
       {/* Header */}
       <div
         style={{
-          padding: "10px 16px",
+          borderTop: "2px solid var(--accent)",
+          padding: "14px 20px",
           borderBottom: "1px solid var(--border-subtle)",
           display: "flex",
           alignItems: "center",
@@ -199,20 +317,20 @@ export default function VariantGrid({ frame, onAction }: Props) {
               height: "6px",
               borderRadius: "50%",
               background: "var(--accent)",
-              boxShadow: "0 0 6px var(--accent)",
+              boxShadow: "0 0 8px var(--accent-glow-strong)",
               flexShrink: 0,
             }}
           />
           <span
             style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              color: "var(--text-muted)",
+              fontFamily: "var(--font-display)",
+              fontSize: "13px",
+              fontWeight: 700,
+              color: "var(--text-primary)",
+              letterSpacing: "-0.01em",
             }}
           >
-            Variant Grid — {variants.length} variants
+            Content Variants
           </span>
         </div>
         <span
@@ -226,9 +344,16 @@ export default function VariantGrid({ frame, onAction }: Props) {
         </span>
       </div>
 
-      {/* Variant cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-        {variants.map((variant, idx) => {
+      {/* Variant cards — grid on desktop, stacked on mobile */}
+      <div
+        style={{
+          padding: "16px 16px 8px",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: "12px",
+        }}
+      >
+        {variants.map((variant) => {
           const isSelected = selected.has(variant.id);
           const isExpanded = expanded.has(variant.id);
           return (
@@ -237,30 +362,36 @@ export default function VariantGrid({ frame, onAction }: Props) {
               onClick={() => toggleSelect(variant.id)}
               style={{
                 padding: "14px 16px",
-                borderBottom: idx < variants.length - 1 ? "1px solid var(--border-subtle)" : "none",
+                borderRadius: "var(--radius-md)",
                 cursor: "pointer",
-                background: isSelected ? "rgba(var(--accent-rgb, 99,102,241), 0.06)" : "transparent",
-                borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
-                transition: "background 0.15s ease, border-color 0.15s ease",
+                background: isSelected ? "var(--accent-glow)" : "var(--bg-surface-3)",
+                border: `1px solid ${isSelected ? "var(--accent)" : "var(--border-default)"}`,
+                boxShadow: isSelected
+                  ? "0 0 20px var(--accent-glow-strong), inset 0 0 0 1px var(--accent)"
+                  : "none",
+                transition: "all 0.2s ease",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
               }}
             >
-              {/* Row 1: channel + angle + metric + select indicator */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
+              {/* Row 1: channel + angle + checkbox */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                 <ChannelBadge channel={variant.intended_channel} />
                 {variant.angle_label && <AnglePill label={variant.angle_label} />}
-                <MetricBadge metric={variant.success_metric} />
                 <div style={{ marginLeft: "auto" }}>
                   <div
                     style={{
-                      width: "14px",
-                      height: "14px",
-                      borderRadius: "3px",
-                      border: `1.5px solid ${isSelected ? "var(--accent)" : "var(--border-subtle)"}`,
+                      width: "16px",
+                      height: "16px",
+                      borderRadius: "4px",
+                      border: `1.5px solid ${isSelected ? "var(--accent)" : "var(--border-default)"}`,
                       background: isSelected ? "var(--accent)" : "transparent",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       flexShrink: 0,
+                      transition: "all 0.15s ease",
                     }}
                   >
                     {isSelected && (
@@ -275,11 +406,11 @@ export default function VariantGrid({ frame, onAction }: Props) {
               {/* Row 2: hypothesis */}
               <p
                 style={{
-                  margin: "0 0 8px 0",
+                  margin: 0,
                   fontSize: "12px",
                   fontStyle: "italic",
                   color: "var(--text-secondary)",
-                  lineHeight: "1.5",
+                  lineHeight: "1.55",
                 }}
               >
                 {variant.hypothesis}
@@ -289,7 +420,6 @@ export default function VariantGrid({ frame, onAction }: Props) {
               {variant.subject_line && (
                 <div
                   style={{
-                    marginBottom: "8px",
                     padding: "5px 10px",
                     background: "var(--bg-elevated)",
                     borderRadius: "4px",
@@ -329,52 +459,50 @@ export default function VariantGrid({ frame, onAction }: Props) {
                 )}
               </div>
 
-              {/* Row 5: CTA + finding refs */}
-              <div
+              {/* Row 5: CTA */}
+              <span
                 style={{
-                  marginTop: "10px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  flexWrap: "wrap",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  color: "var(--accent)",
+                  background: "var(--accent-glow)",
+                  border: "1px solid rgba(0,212,170,0.2)",
+                  borderRadius: "4px",
+                  padding: "3px 8px",
+                  fontFamily: "var(--font-mono)",
+                  alignSelf: "flex-start",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    color: "var(--accent)",
-                    background: "rgba(var(--accent-rgb,99,102,241),0.1)",
-                    border: "1px solid rgba(var(--accent-rgb,99,102,241),0.25)",
-                    borderRadius: "4px",
-                    padding: "2px 8px",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                >
-                  CTA: {variant.cta}
-                </span>
-                {variant.source_finding_ids.length > 0 && (
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    Sources: {variant.source_finding_ids.length} finding{variant.source_finding_ids.length !== 1 ? "s" : ""}
-                  </span>
-                )}
+                CTA: {variant.cta}
+              </span>
+
+              {/* Row 6: source finding chips */}
+              {variant.source_finding_ids.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                  {variant.source_finding_ids.map((fid, i) => (
+                    <FindingChip key={fid} findingId={fid} index={i} />
+                  ))}
+                </div>
+              )}
+
+              {/* Row 7: success metric */}
+              <div style={{ marginTop: "auto", paddingTop: "4px" }}>
+                <MetricBadge metric={variant.success_metric} />
               </div>
             </div>
           );
         })}
       </div>
 
+      {/* A/B split indicator */}
+      <ABSplitIndicator selectedCount={selected.size} />
+
       {/* Footer actions */}
       <div
         style={{
           padding: "12px 16px",
           borderTop: "1px solid var(--border-subtle)",
+          marginTop: "8px",
           display: "flex",
           alignItems: "center",
           gap: "8px",
@@ -382,7 +510,7 @@ export default function VariantGrid({ frame, onAction }: Props) {
         }}
       >
         <button type="button" className="btn-ghost" onClick={handleSelectAll}>
-          Select all
+          Select All
         </button>
         <button type="button" className="btn-ghost" onClick={handleClearAll}>
           Clear
@@ -391,10 +519,10 @@ export default function VariantGrid({ frame, onAction }: Props) {
           type="button"
           className="btn-accent"
           disabled={selected.size === 0}
-          onClick={handleDeploy}
+          onClick={handleConfirm}
           style={{ marginLeft: "auto", opacity: selected.size === 0 ? 0.4 : 1 }}
         >
-          Deploy selected ({selected.size})
+          Confirm Selected Variants ({selected.size})
         </button>
       </div>
     </div>

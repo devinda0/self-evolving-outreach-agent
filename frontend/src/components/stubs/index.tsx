@@ -8,14 +8,11 @@ export { default as ClarificationPrompt } from "../ClarificationPrompt";
 export { default as SegmentSelector } from "../SegmentSelector";
 export { default as ProspectPicker } from "../ProspectPicker";
 export { default as VariantGrid } from "../VariantGrid";
+export { default as ChannelSelector } from "../ChannelSelector";
 
 interface Props {
   frame: UIFrame;
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
-}
-
-export function ChannelSelector(props: Props) {
-  return <StubComponent {...props} />;
 }
 
 export function DeploymentConfirm(props: Props) {
