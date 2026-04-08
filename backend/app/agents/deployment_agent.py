@@ -20,6 +20,7 @@ import httpx
 
 from app.core.config import settings
 from app.db.crud import save_deployment_record
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import DeploymentRecord
 from app.models.ui_frames import UIAction, UIFrame
@@ -288,6 +289,17 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         selected_prospect_ids_count,
         deployment_confirmed,
     )
+
+    # Build scoped context bundle — provides compact prospect cards and selected variants
+    try:
+        bundle = await memory_manager.build_context_bundle(state, "deployment")
+        logger.debug(
+            "deployment_agent_node: bundle built | variants=%d compact_prospects=%d",
+            len(bundle.get("selected_variant", [])),
+            len(bundle.get("selected_prospects", [])),
+        )
+    except Exception as exc:
+        logger.warning("deployment_agent_node: memory bundle failed (%s) — continuing", exc)
 
     # -- Resolve selected variants --
     all_variants = state.get("content_variants", [])

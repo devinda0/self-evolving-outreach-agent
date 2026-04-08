@@ -20,6 +20,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import settings
 from app.db.crud import save_content_variant
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import ContentVariant
 from app.models.ui_frames import UIAction, UIFrame
@@ -373,14 +374,20 @@ async def content_agent_node(state: CampaignState) -> dict:
             ],
         }
 
-    # -- Resolve segment --
-    selected_segment = get_segment_by_id(
+    # -- Build scoped context bundle via memory manager --
+    bundle = await memory_manager.build_context_bundle(state, "content")
+
+    # -- Resolve segment from bundle (falls back to first candidate) --
+    selected_segment = bundle.get("selected_segment") or get_segment_by_id(
         state.get("selected_segment_id"),
         state.get("segment_candidates", []),
     )
 
-    # -- Top research findings (cap at 5 for context budget) --
-    top_findings = state.get("research_findings", [])[:5]
+    # -- Top research findings from bundle (already scoped and sorted) --
+    top_findings = bundle.get("source_findings") or state.get("research_findings", [])[:5]
+
+    # -- Winning angle memory from bundle --
+    winning_angle_memory = bundle.get("winning_angle_memory") or state.get("prior_cycle_summary")
 
     # -- Generate variants --
     variants = await generate_variants(
@@ -391,7 +398,7 @@ async def content_agent_node(state: CampaignState) -> dict:
         selected_segment=selected_segment,
         selected_channels=state.get("selected_channels", ["email"]),
         content_request=state.get("content_request"),
-        winning_angle_memory=state.get("prior_cycle_summary"),
+        winning_angle_memory=winning_angle_memory,
         session_id=session_id,
         cycle_number=state.get("cycle_number", 1),
     )
