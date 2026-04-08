@@ -28,6 +28,7 @@ from app.memory.manager import (
     enforce_token_budget,
     log_decision,
     maybe_summarize_node,
+    memory_manager,
 )
 
 # ---------------------------------------------------------------------------
@@ -683,7 +684,8 @@ class TestMaybeSummarizeNode:
     async def test_summary_triggered_with_25_messages(self):
         """With 25 messages and no prior summary, the node must produce a summary."""
         state = _make_state(messages=self._make_messages(25), _last_summary_message_count=0)
-        result = await maybe_summarize_node(state)
+        with patch.object(memory_manager, "_get_llm", return_value=None):
+            result = await maybe_summarize_node(state)
 
         assert "conversation_summary" in result
         assert result["conversation_summary"]
@@ -692,7 +694,8 @@ class TestMaybeSummarizeNode:
     async def test_decision_log_entry_written(self):
         """Node appends a 'summary' entry to decision_log."""
         state = _make_state(messages=self._make_messages(25), _last_summary_message_count=0)
-        result = await maybe_summarize_node(state)
+        with patch.object(memory_manager, "_get_llm", return_value=None):
+            result = await maybe_summarize_node(state)
 
         assert "decision_log" in result
         entry = result["decision_log"][-1]
@@ -705,7 +708,8 @@ class TestMaybeSummarizeNode:
         """Node writes _last_summary_message_count = len(messages) - VERBATIM_KEEP_LAST_N."""
         messages = self._make_messages(25)
         state = _make_state(messages=messages, _last_summary_message_count=0)
-        result = await maybe_summarize_node(state)
+        with patch.object(memory_manager, "_get_llm", return_value=None):
+            result = await maybe_summarize_node(state)
 
         expected_coverage = len(messages) - VERBATIM_KEEP_LAST_N  # 25 - 8 = 17
         assert result["_last_summary_message_count"] == expected_coverage
@@ -727,7 +731,8 @@ class TestMaybeSummarizeNode:
         messages = self._make_messages(30)
         # last summary covered 10 messages; 30 - 10 = 20 >= RESUMMARIZE_EVERY_N (10)
         state = _make_state(messages=messages, _last_summary_message_count=RESUMMARIZE_EVERY_N)
-        result = await maybe_summarize_node(state)
+        with patch.object(memory_manager, "_get_llm", return_value=None):
+            result = await maybe_summarize_node(state)
 
         assert "conversation_summary" in result
         assert result["conversation_summary"]
@@ -737,7 +742,8 @@ class TestMaybeSummarizeNode:
         """Summary covers messages from last_coverage to len(messages) - VERBATIM_KEEP_LAST_N."""
         messages = self._make_messages(25)
         state = _make_state(messages=messages, _last_summary_message_count=0)
-        result = await maybe_summarize_node(state)
+        with patch.object(memory_manager, "_get_llm", return_value=None):
+            result = await maybe_summarize_node(state)
 
         entry = result["decision_log"][-1]
         # For 25 messages, last_coverage=0: covers_message_range should be [0, 17]
