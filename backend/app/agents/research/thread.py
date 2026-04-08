@@ -14,6 +14,7 @@ from uuid import uuid4
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import settings
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.tools.research_policy import DEFAULT_RESEARCH_POLICY
 from app.tools.search import extract_page, search_web
@@ -286,6 +287,25 @@ async def research_thread_node(state: CampaignState) -> dict:
 
     logger.info("research_thread_node | session=%s thread=%s", session_id, thread_type)
 
+    # Build scoped context bundle to pull prior long-term intelligence
+    try:
+        bundle = await memory_manager.build_context_bundle(state, "research")
+        prior_findings = bundle.get("top_long_term_findings", [])
+        prior_intelligence: str | None = None
+        if prior_findings:
+            summaries = [
+                f.get("claim", "") for f in prior_findings if f.get("claim")
+            ]
+            prior_intelligence = "Prior intelligence:\n" + "\n".join(
+                f"- {s}" for s in summaries
+            )
+    except Exception as exc:
+        logger.warning(
+            "research_thread_node: memory bundle failed (%s) — continuing without prior intelligence",
+            exc,
+        )
+        prior_intelligence = state.get("briefing_summary")
+
     try:
         # Step 1: Generate targeted queries
         queries = await generate_queries(product_name, target_market, thread_type)
@@ -313,13 +333,13 @@ async def research_thread_node(state: CampaignState) -> dict:
                 except Exception as e:
                     logger.warning("Page extract failed for %s: %s", url, e)
 
-        # Step 4: Synthesize findings with Gemini
+        # Step 4: Synthesize findings with Gemini (pass prior intelligence from memory manager)
         findings = await synthesize_thread_findings(
             thread_type=thread_type,
             product_name=product_name,
             target_market=target_market,
             raw_results=all_results,
-            prior_intelligence=state.get("briefing_summary"),
+            prior_intelligence=prior_intelligence,
         )
 
         # Enrich findings with session metadata

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from app.db.crud import save_prospect_cards, save_segments
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.prospect import Segment
 from app.models.ui_frames import UIAction, UIFrame
@@ -483,6 +484,14 @@ async def segment_agent_node(state: CampaignState) -> dict:
         findings_count,
     )
 
+    # Build scoped context bundle for structured context access
+    try:
+        bundle = await memory_manager.build_context_bundle(state, "segment")
+        top_findings = bundle.get("top_findings") or state.get("research_findings", [])[:5]
+    except Exception as exc:
+        logger.warning("segment_agent_node: memory bundle failed (%s) — continuing", exc)
+        top_findings = state.get("research_findings", [])[:5]
+
     # Step 1: Derive segment candidates from briefing
     segments = await derive_segments(
         briefing_summary=state.get("briefing_summary"),
@@ -498,7 +507,6 @@ async def segment_agent_node(state: CampaignState) -> dict:
     raw_prospects = await load_prospects(state.get("prospect_pool_ref"))
 
     # Step 3: Score each prospect against segments
-    top_findings = state.get("research_findings", [])[:5]
     scored = await score_prospects(
         prospects=raw_prospects,
         segments=segments,

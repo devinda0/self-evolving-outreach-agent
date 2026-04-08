@@ -15,6 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import settings
 from app.db.crud import save_research_finding
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.ui_frames import UIAction, UIFrame
 
@@ -173,6 +174,12 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
         len(findings),
         failed,
     )
+
+    # Build scoped context bundle for structured context access
+    try:
+        await memory_manager.build_context_bundle(state, "research_synthesis")
+    except Exception as exc:
+        logger.warning("research_synthesizer_node: memory bundle failed (%s) — continuing", exc)
 
     # Deduplicate findings
     deduplicated = _deduplicate_findings(findings)

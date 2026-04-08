@@ -20,6 +20,7 @@ from app.db.crud import (
     save_quarantine_event,
     update_finding_confidence,
 )
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import IntelligenceEntry
 from app.models.ui_frames import UIAction, UIFrame
@@ -367,6 +368,17 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         len(records),
         len(findings),
     )
+
+    # Build scoped context bundle for structured context access
+    try:
+        bundle = await memory_manager.build_context_bundle(state, "feedback")
+        logger.debug(
+            "feedback_agent_node: bundle built | deployment_records=%d normalized_metrics=%d",
+            len(bundle.get("deployment_records", [])),
+            len(bundle.get("normalized_metrics", [])),
+        )
+    except Exception as exc:
+        logger.warning("feedback_agent_node: memory bundle failed (%s) — continuing", exc)
 
     if not events:
         return _emit_feedback_prompt(state)

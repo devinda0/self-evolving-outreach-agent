@@ -21,6 +21,7 @@ from uuid import uuid4
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import settings
+from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.ui_frames import UIAction, UIFrame
 
@@ -223,9 +224,15 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
     session_id = state.get("session_id", "unknown")
     logger.info("orchestrator_node called | session=%s", session_id)
 
-    # Build context bundle (last 12 messages + stage summary)
-    all_messages = state.get("messages", [])
-    context_messages = all_messages[-12:] if len(all_messages) > 12 else all_messages
+    # Summarise long conversations before building context
+    summary_patch = await memory_manager.maybe_summarize_conversation(state)
+    if summary_patch:
+        # Apply summary patch to reading state for this turn only
+        state = {**state, **summary_patch}  # type: ignore[assignment]
+
+    # Build scoped context bundle via memory manager
+    bundle = await memory_manager.build_context_bundle(state, "orchestrator")
+    context_messages = bundle.get("recent_messages", [])
 
     # Get the LLM client
     llm = _get_llm()
@@ -236,13 +243,15 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
         return _make_clarify_response(state)
 
     # Build the prompt
+    task = bundle.get("task_header", {})
+    stage = bundle.get("current_stage_state", {})
     prompt = f"""Campaign context:
-- Product: {state.get("product_name", "Unknown")}
+- Product: {task.get("product_name", "Unknown")}
 - Description: {state.get("product_description", "No description")}
-- Target Market: {state.get("target_market", "Unknown")}
-- Stage: {state.get("active_stage_summary", "starting")}
-- Cycle: {state.get("cycle_number", 1)}
-- Prior intent: {state.get("previous_intent", "none")}
+- Target Market: {task.get("target_market", "Unknown")}
+- Stage: {stage.get("active_stage_summary", "starting")}
+- Cycle: {task.get("cycle_number", 1)}
+- Prior intent: {stage.get("previous_intent", "none")}
 
 Conversation (last {len(context_messages)} turns):
 {format_messages(context_messages)}
@@ -273,7 +282,7 @@ Classify the latest user intent."""
                 result["next_node"],
             )
 
-            return {
+            patch: dict[str, Any] = {
                 "current_intent": result["current_intent"],
                 "previous_intent": state.get("current_intent"),
                 "next_node": result["next_node"],
@@ -281,6 +290,10 @@ Classify the latest user intent."""
                 "clarification_options": result.get("clarification_options", []),
                 "intent_history": state.get("intent_history", []) + [result["current_intent"]],
             }
+            # Propagate any summary state updates produced earlier in this turn
+            if summary_patch:
+                patch.update(summary_patch)
+            return patch
 
         except json.JSONDecodeError as e:
             last_error = e
