@@ -149,13 +149,35 @@ async def get_deployment_by_provider_message_id(
 async def save_feedback_event(event: dict[str, Any]) -> None:
     """Insert a normalized feedback event."""
     db = get_db()
-    await db[FEEDBACK_EVENTS].insert_one(event)
+    await db[FEEDBACK_EVENTS].insert_one({**event})
+
+
+async def get_feedback_event_by_dedupe_key(dedupe_key: str) -> dict[str, Any] | None:
+    """Look up a feedback event by its deduplication key."""
+    db = get_db()
+    doc = await db[FEEDBACK_EVENTS].find_one({"dedupe_key": dedupe_key})
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def get_feedback_events_for_session(session_id: str) -> list[dict[str, Any]]:
+    """Return all normalized feedback events for a session, ordered by received_at."""
+    db = get_db()
+    cursor = db[FEEDBACK_EVENTS].find({"session_id": session_id}).sort(
+        "received_at", ASCENDING
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
 
 
 async def save_quarantine_event(event: dict[str, Any]) -> None:
     """Insert an unmatched/quarantined event."""
     db = get_db()
-    await db[QUARANTINE].insert_one(event)
+    await db[QUARANTINE].insert_one({**event})
 
 
 # ---------------------------------------------------------------------------
