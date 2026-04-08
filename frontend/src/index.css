@@ -236,3 +236,195 @@ body::before {
   color: var(--accent);
   background: var(--accent-glow);
 }
+
+/* ------------------------------------------------------------------ */
+/* Markdown prose styling for assistant messages                        */
+/* ------------------------------------------------------------------ */
+
+.prose-assistant {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.prose-assistant p {
+  margin: 0 0 0.5em;
+}
+.prose-assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-assistant h1,
+.prose-assistant h2,
+.prose-assistant h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0.8em 0 0.4em;
+  letter-spacing: -0.01em;
+}
+.prose-assistant h1 { font-size: 1.15em; }
+.prose-assistant h2 { font-size: 1.05em; }
+.prose-assistant h3 { font-size: 1em; color: var(--text-secondary); }
+
+.prose-assistant ul,
+.prose-assistant ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.prose-assistant li {
+  margin: 0.15em 0;
+}
+.prose-assistant li::marker {
+  color: var(--accent-dim);
+}
+
+.prose-assistant strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.prose-assistant em {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.prose-assistant code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-surface-3);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+.prose-assistant pre {
+  background: var(--bg-surface-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.prose-assistant pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+
+.prose-assistant blockquote {
+  border-left: 3px solid var(--accent-dim);
+  padding-left: 12px;
+  margin: 0.5em 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.prose-assistant a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-assistant a:hover {
+  color: var(--accent-dim);
+}
+
+.prose-assistant hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 0.8em 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Collapsible reasoning panel                                         */
+/* ------------------------------------------------------------------ */
+
+.reasoning-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 18px;
+  background: var(--bg-surface-1);
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  transition: color 0.15s, background 0.15s;
+}
+.reasoning-toggle:hover {
+  color: var(--text-secondary);
+  background: var(--bg-surface-2);
+}
+
+.reasoning-toggle-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+.reasoning-intent-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid rgba(0, 212, 170, 0.15);
+  border-radius: 3px;
+  padding: 1px 7px;
+}
+
+.reasoning-route-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.reasoning-body {
+  background: var(--bg-surface-1);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.reasoning-entry {
+  margin-bottom: 8px;
+}
+.reasoning-entry:last-child {
+  margin-bottom: 0;
+}
+
+.reasoning-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.reasoning-value {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.reasoning-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.reasoning-grid {
+  display: flex;
+  gap: 24px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}

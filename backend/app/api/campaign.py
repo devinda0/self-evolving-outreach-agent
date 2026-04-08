@@ -186,8 +186,15 @@ async def _run_graph_for_message(
                         "message": f"Running {node_name}…",
                     })
 
-            # Forward streaming LLM tokens if any node uses streaming LLM calls
+            # Forward streaming LLM tokens — skip internal nodes (orchestrator, clarify)
             elif event_type == "on_chat_model_stream":
+                meta = event.get("metadata", {})
+                node = (
+                    meta.get("langgraph_node", "")
+                    or event.get("tags", [""])[0] if event.get("tags") else ""
+                )
+                if node in ("orchestrator", "clarify"):
+                    continue  # routing/classification JSON, not user-facing
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
                     await websocket.send_json({"type": "token", "content": chunk.content})
@@ -304,13 +311,17 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                 await _run_graph_for_message(websocket, session_id, content, db_state)
 
             elif msg_type == "ui_action":
-                frames = await _apply_ui_action(
-                    session_id,
-                    str(data.get("action_id", "")),
-                    data.get("payload", {}),
-                )
-                for frame in frames:
-                    await websocket.send_json(frame)
+                action_id = str(data.get("action_id", ""))
+                payload = data.get("payload", {})
+
+                # Clarification responses should re-enter the graph as a user message
+                if payload.get("response"):
+                    content = str(payload["response"])
+                    await _run_graph_for_message(websocket, session_id, content, db_state)
+                else:
+                    frames = await _apply_ui_action(session_id, action_id, payload)
+                    for frame in frames:
+                        await websocket.send_json(frame)
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", session_id)
