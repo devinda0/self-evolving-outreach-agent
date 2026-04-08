@@ -7,14 +7,11 @@ export { default as ResearchProgress } from "../ResearchProgress";
 export { default as ClarificationPrompt } from "../ClarificationPrompt";
 export { default as SegmentSelector } from "../SegmentSelector";
 export { default as ProspectPicker } from "../ProspectPicker";
+export { default as VariantGrid } from "../VariantGrid";
 
 interface Props {
   frame: UIFrame;
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
-}
-
-export function VariantGrid(props: Props) {
-  return <StubComponent {...props} />;
 }
 
 export function ChannelSelector(props: Props) {
