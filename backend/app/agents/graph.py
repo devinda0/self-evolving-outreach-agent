@@ -12,6 +12,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
+from app.agents.orchestrator import clarify_node, orchestrator_node
 from app.agents.segment_agent import segment_agent_node
 from app.db.client import get_db
 from app.models.campaign_state import CampaignState
@@ -54,20 +55,8 @@ def research_fan_out(state: CampaignState) -> list[Send]:
 
 
 # ---------------------------------------------------------------------------
-# Stub node implementations
+# Stub node implementations (will be replaced by real agents in later issues)
 # ---------------------------------------------------------------------------
-
-
-async def orchestrator_node(state: CampaignState) -> dict:
-    """STUB: classify intent and route. Default routes to clarify."""
-    logger.info("orchestrator_node called | session=%s", state.get("session_id"))
-    return {
-        "current_intent": "clarify",
-        "next_node": "clarify",
-        "clarification_question": (
-            "What would you like to do? (research / generate / deploy / feedback)"
-        ),
-    }
 
 
 async def research_dispatcher_node(state: CampaignState) -> dict:
@@ -138,13 +127,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     }
 
 
-async def clarify_node(state: CampaignState) -> dict:
-    """STUB: ask clarification and return to orchestrator."""
-    logger.info("clarify_node called | session=%s", state.get("session_id"))
-    question = state.get("clarification_question") or "Could you clarify what you'd like to do?"
-    return {
-        "clarification_question": question,
-    }
+# Note: orchestrator_node and clarify_node are imported from app.agents.orchestrator
 
 
 # ---------------------------------------------------------------------------
