@@ -27,15 +27,17 @@ from app.models.ui_frames import UIAction, UIFrame
 logger = logging.getLogger(__name__)
 
 # Valid intent modes
-VALID_INTENTS = frozenset([
-    "research",
-    "segment",
-    "generate",
-    "deploy",
-    "feedback",
-    "refined_cycle",
-    "clarify",
-])
+VALID_INTENTS = frozenset(
+    [
+        "research",
+        "segment",
+        "generate",
+        "deploy",
+        "feedback",
+        "refined_cycle",
+        "clarify",
+    ]
+)
 
 # Intent to node mapping
 INTENT_TO_NODE = {
@@ -235,12 +237,12 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
 
     # Build the prompt
     prompt = f"""Campaign context:
-- Product: {state.get('product_name', 'Unknown')}
-- Description: {state.get('product_description', 'No description')}
-- Target Market: {state.get('target_market', 'Unknown')}
-- Stage: {state.get('active_stage_summary', 'starting')}
-- Cycle: {state.get('cycle_number', 1)}
-- Prior intent: {state.get('previous_intent', 'none')}
+- Product: {state.get("product_name", "Unknown")}
+- Description: {state.get("product_description", "No description")}
+- Target Market: {state.get("target_market", "Unknown")}
+- Stage: {state.get("active_stage_summary", "starting")}
+- Cycle: {state.get("cycle_number", 1)}
+- Prior intent: {state.get("previous_intent", "none")}
 
 Conversation (last {len(context_messages)} turns):
 {format_messages(context_messages)}
@@ -253,10 +255,12 @@ Classify the latest user intent."""
 
     for attempt in range(max_retries):
         try:
-            response = await llm.ainvoke([
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ])
+            response = await llm.ainvoke(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
+            )
 
             # Parse the response
             result = _parse_llm_response(response.content)

@@ -29,6 +29,7 @@ from app.agents.segment_agent import segment_agent_node
 # Minimal state helper
 # ---------------------------------------------------------------------------
 
+
 def _make_state(**overrides) -> dict:
     """Build a minimal CampaignState dict with sensible defaults."""
     base = {
@@ -82,6 +83,7 @@ def _make_state(**overrides) -> dict:
 # Graph compilation
 # ---------------------------------------------------------------------------
 
+
 def test_build_graph_compiles():
     """Graph compiles without errors (no checkpointer)."""
     graph = build_graph(checkpointer=None)
@@ -91,6 +93,7 @@ def test_build_graph_compiles():
 # ---------------------------------------------------------------------------
 # Routing function
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "next_node,expected",
@@ -129,6 +132,7 @@ def test_route_from_orchestrator_none_defaults_to_clarify():
 # Research fan-out
 # ---------------------------------------------------------------------------
 
+
 def test_research_fan_out_default_threads():
     state = _make_state(active_thread_types=[])
     sends = research_fan_out(state)
@@ -146,6 +150,7 @@ def test_research_fan_out_custom_threads():
 # ---------------------------------------------------------------------------
 # Stub nodes return expected keys
 # ---------------------------------------------------------------------------
+
 
 async def test_orchestrator_node_returns_routing():
     """Orchestrator returns routing decision (mock LLM mode returns clarify)."""
@@ -169,14 +174,32 @@ async def test_research_thread_node_returns_findings():
     from unittest.mock import AsyncMock, patch
 
     mock_results = [
-        {"title": "Competitor X launches product", "url": "https://example.com/1", "content": "Details", "score": 0.7},
-        {"title": "Competitor Y pricing update", "url": "https://example.com/2", "content": "Info", "score": 0.6},
+        {
+            "title": "Competitor X launches product",
+            "url": "https://example.com/1",
+            "content": "Details",
+            "score": 0.7,
+        },
+        {
+            "title": "Competitor Y pricing update",
+            "url": "https://example.com/2",
+            "content": "Info",
+            "score": 0.6,
+        },
     ]
 
     with (
         patch("app.agents.research.thread._get_llm", return_value=None),
-        patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
-        patch("app.agents.research.thread.extract_page", new_callable=AsyncMock, return_value="Page text"),
+        patch(
+            "app.agents.research.thread.search_web",
+            new_callable=AsyncMock,
+            return_value=mock_results,
+        ),
+        patch(
+            "app.agents.research.thread.extract_page",
+            new_callable=AsyncMock,
+            return_value="Page text",
+        ),
     ):
         state = _make_state(thread_type="competitor")
         result = await research_thread_node(state)
@@ -188,8 +211,22 @@ async def test_research_synthesizer_node_returns_briefing():
     from unittest.mock import AsyncMock, patch
 
     findings = [
-        {"claim": "Claim A", "confidence": 0.8, "thread_type": "competitor", "evidence": "ev", "source_url": "http://a.com", "actionable_implication": "act"},
-        {"claim": "Claim B", "confidence": 0.7, "thread_type": "audience", "evidence": "ev", "source_url": "http://b.com", "actionable_implication": "act"},
+        {
+            "claim": "Claim A",
+            "confidence": 0.8,
+            "thread_type": "competitor",
+            "evidence": "ev",
+            "source_url": "http://a.com",
+            "actionable_implication": "act",
+        },
+        {
+            "claim": "Claim B",
+            "confidence": 0.7,
+            "thread_type": "audience",
+            "evidence": "ev",
+            "source_url": "http://b.com",
+            "actionable_implication": "act",
+        },
     ]
     state = _make_state(research_findings=findings)
 
@@ -219,7 +256,9 @@ async def test_segment_agent_node_returns_candidates():
 async def test_content_agent_node_returns_variants():
     from unittest.mock import AsyncMock, patch
 
-    state = _make_state(briefing_summary="Test briefing: competitor gap identified in enterprise segment.")
+    state = _make_state(
+        briefing_summary="Test briefing: competitor gap identified in enterprise segment."
+    )
     with (
         patch("app.agents.content_agent._get_llm", return_value=None),
         patch("app.agents.content_agent.save_content_variant", new_callable=AsyncMock),
@@ -233,7 +272,12 @@ async def test_deployment_agent_node_emits_confirm_when_not_confirmed():
     state = _make_state(
         deployment_confirmed=False,
         content_variants=[
-            {"id": "v1", "body": "Hi {{first_name}}", "intended_channel": "email", "angle_label": "test"},
+            {
+                "id": "v1",
+                "body": "Hi {{first_name}}",
+                "intended_channel": "email",
+                "angle_label": "test",
+            },
         ],
         selected_variant_ids=["v1"],
         prospect_cards=[
@@ -255,8 +299,18 @@ async def test_deployment_agent_node_sends_when_confirmed():
     state = _make_state(
         deployment_confirmed=True,
         content_variants=[
-            {"id": "v1", "body": "Hi {{first_name}} at {{company}}", "intended_channel": "email", "angle_label": "test"},
-            {"id": "v2", "body": "Hey {{first_name}}", "intended_channel": "email", "angle_label": "roi"},
+            {
+                "id": "v1",
+                "body": "Hi {{first_name}} at {{company}}",
+                "intended_channel": "email",
+                "angle_label": "test",
+            },
+            {
+                "id": "v2",
+                "body": "Hey {{first_name}}",
+                "intended_channel": "email",
+                "angle_label": "roi",
+            },
         ],
         selected_variant_ids=["v1", "v2"],
         prospect_cards=[
@@ -295,6 +349,7 @@ async def test_clarify_node_returns_question():
 # ---------------------------------------------------------------------------
 # End-to-end graph invocation (no checkpointer, stub orchestrator→clarify)
 # ---------------------------------------------------------------------------
+
 
 async def test_graph_invoke_returns_updated_state():
     """Invoke the graph — stub orchestrator routes to clarify, loops until recursion limit.
@@ -347,8 +402,16 @@ async def test_graph_research_route():
     for send in sends:
         with (
             patch("app.agents.research.thread._get_llm", return_value=None),
-            patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
-            patch("app.agents.research.thread.extract_page", new_callable=AsyncMock, return_value="text"),
+            patch(
+                "app.agents.research.thread.search_web",
+                new_callable=AsyncMock,
+                return_value=mock_results,
+            ),
+            patch(
+                "app.agents.research.thread.extract_page",
+                new_callable=AsyncMock,
+                return_value="text",
+            ),
         ):
             thread_result = await research_thread_node(send.arg)
             all_findings.extend(thread_result["research_findings"])
@@ -359,9 +422,7 @@ async def test_graph_research_route():
         patch("app.agents.research.synthesizer._get_llm", return_value=None),
         patch("app.agents.research.synthesizer.save_research_finding", new_callable=AsyncMock),
     ):
-        synth_result = await research_synthesizer_node(
-            _make_state(research_findings=all_findings)
-        )
+        synth_result = await research_synthesizer_node(_make_state(research_findings=all_findings))
     assert len(synth_result["briefing_summary"]) > 0
     assert "pending_ui_frames" in synth_result
 

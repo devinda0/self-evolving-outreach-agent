@@ -1,10 +1,11 @@
-"""Deployment Agent — mock send layer with full deployment record tracking.
+"""Deployment Agent — send layer with full deployment record tracking.
 
 Handles:
 - A/B split plan generation (round-robin assignment of prospects to variant cohorts)
 - Content personalisation ({{first_name}}, {{company}} token replacement)
-- Mock send simulation (returns fake provider_message_id)
-- DeploymentRecord creation persisted to MongoDB
+- Real email sending via Resend when USE_MOCK_SEND=false
+- Mock send fallback for local development and non-email channels
+- DeploymentRecord creation persisted to MongoDB (status: sent | failed)
 - DeploymentConfirm UI frame (pre-send) and DeliveryStatusCard (post-send)
 """
 
@@ -12,8 +13,12 @@ import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import uuid4
 
+import httpx
+
+from app.core.config import settings
 from app.db.crud import save_deployment_record
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import DeploymentRecord
@@ -55,26 +60,110 @@ def build_ab_split_plan(variants: list[dict], prospects: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def personalize_variant(variant: dict, prospect: dict) -> str:
-    """Replace {{first_name}} and {{company}} tokens with prospect data."""
-    content = variant.get("body", "")
+def _apply_tokens(text: str, prospect: dict) -> str:
+    """Replace {{first_name}} and {{company}} tokens in any string."""
     name = prospect.get("name", "")
     first_name = name.split()[0] if name else ""
     company = prospect.get("company", "")
-    content = content.replace("{{first_name}}", first_name)
-    content = content.replace("{{company}}", company)
+    text = text.replace("{{first_name}}", first_name)
+    text = text.replace("{{company}}", company)
+    return text
+
+
+def personalize_variant(variant: dict, prospect: dict) -> str:
+    """Replace {{first_name}} and {{company}} tokens in the variant body (plain text)."""
+    return _apply_tokens(variant.get("body", ""), prospect)
+
+
+def personalize_variant_html(variant: dict, prospect: dict) -> str:
+    """Return a personalised HTML body for email sending.
+
+    Uses ``html_body`` if present on the variant; falls back to ``body``.
+    Plain-text bodies are converted to basic HTML by replacing newlines
+    with ``<br>`` tags.
+    """
+    raw = variant.get("html_body") or variant.get("body", "")
+    content = _apply_tokens(raw, prospect)
+    # If there are no HTML tags, wrap as simple paragraph HTML
+    if "<" not in content:
+        lines = content.replace("\r\n", "\n").split("\n")
+        content = "<br>".join(lines)
+        content = f"<p>{content}</p>"
     return content
 
 
 # ---------------------------------------------------------------------------
-# Mock send
+# Send helpers
 # ---------------------------------------------------------------------------
 
 
 async def mock_send(channel: str, prospect: dict, content: str) -> str:
-    """Simulate a send. Returns a fake provider_message_id."""
+    """Simulate a send. Returns a fake provider_message_id.
+
+    Used when ``USE_MOCK_SEND=true`` or for non-email channels.
+    """
     await asyncio.sleep(0.05)  # simulate network latency
     return f"mock_{channel}_{uuid4().hex[:8]}"
+
+
+async def send_via_email(variant: dict, prospect: dict, session_id: str) -> str:
+    """Send a real email via Resend and return the provider_message_id.
+
+    Raises ``httpx.HTTPStatusError`` on provider errors so the caller can
+    mark the deployment record as failed.
+    """
+    from app.tools.resend_client import send_email  # local import to keep mock-able
+
+    rendered_html = personalize_variant_html(variant, prospect)
+    subject = _apply_tokens(variant.get("subject_line", ""), prospect)
+
+    result = await send_email(
+        to_email=prospect["email"],
+        to_name=prospect.get("name", ""),
+        subject=subject,
+        html_body=rendered_html,
+        tags={
+            "session_id": session_id,
+            "variant_id": variant["id"],
+            "prospect_id": prospect["id"],
+        },
+    )
+    return result["id"]  # provider_message_id for webhook correlation
+
+
+async def _dispatch_send(
+    channel: str,
+    variant: dict,
+    prospect: dict,
+    session_id: str,
+) -> tuple[str | None, str | None]:
+    """Route a send to mock or real provider.
+
+    Returns ``(provider_message_id, error_detail)``.  On success
+    ``error_detail`` is ``None``; on failure ``provider_message_id`` is
+    ``None``.
+    """
+    if settings.USE_MOCK_SEND or channel != "email":
+        msg_id = await mock_send(channel, prospect, personalize_variant(variant, prospect))
+        return msg_id, None
+
+    try:
+        msg_id = await send_via_email(variant, prospect, session_id)
+        return msg_id, None
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "_dispatch_send Resend HTTP error prospect=%s status=%s",
+            prospect.get("id"),
+            exc.response.status_code,
+        )
+        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "_dispatch_send unexpected error prospect=%s: %s",
+            prospect.get("id"),
+            exc,
+        )
+        return None, str(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +239,7 @@ def build_delivery_status_frame(
                     "channel": r.get("channel"),
                     "ab_cohort": r.get("ab_cohort"),
                     "provider_message_id": r.get("provider_message_id"),
-                    "status": "sent",
+                    "status": r.get("status", "sent"),
                 }
                 for r in deployment_records
             ],
@@ -234,9 +323,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         return {
             "next_node": "orchestrator",
             "session_complete": True,
-            "error_messages": [
-                "No prospects found. Please run segmentation before deploying."
-            ],
+            "error_messages": ["No prospects found. Please run segmentation before deploying."],
         }
 
     # -- If not yet confirmed, emit DeploymentConfirm and wait --
@@ -272,15 +359,20 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         prospect = assignment["prospect"]
         cohort = assignment["cohort"]
 
-        # Personalise content
+        channel = variant.get("intended_channel", "email")
+
+        # Personalise content (plain text for hash; HTML built inside send_via_email)
         rendered_content = personalize_variant(variant, prospect)
 
-        # Send via mock provider
-        provider_message_id = await mock_send(
-            channel=variant.get("intended_channel", "email"),
+        # Dispatch to real or mock provider
+        provider_message_id, error_detail = await _dispatch_send(
+            channel=channel,
+            variant=variant,
             prospect=prospect,
-            content=rendered_content,
+            session_id=session_id,
         )
+        send_status: Literal["sent", "failed"] = "failed" if error_detail else "sent"
+        provider = "resend" if not settings.USE_MOCK_SEND and channel == "email" else "mock"
 
         # Create deployment record
         record = DeploymentRecord(
@@ -289,14 +381,16 @@ async def deployment_agent_node(state: CampaignState) -> dict:
             variant_id=variant.get("id", ""),
             segment_id=segment_id,
             prospect_id=prospect.get("id", ""),
-            channel=variant.get("intended_channel", "email"),
-            provider="mock",
+            channel=channel,
+            provider=provider,
             provider_message_id=provider_message_id,
             ab_cohort=cohort,
             rendered_content_hash=hashlib.md5(  # noqa: S324
                 rendered_content.encode()
             ).hexdigest(),
             sent_at=datetime.now(timezone.utc),
+            status=send_status,
+            error_detail=error_detail,
         )
 
         await save_deployment_record(record.model_dump())

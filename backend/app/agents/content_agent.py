@@ -68,6 +68,7 @@ Each object must contain exactly these keys:
 # LLM helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_llm() -> ChatGoogleGenerativeAI | None:
     if settings.USE_MOCK_LLM:
         return None
@@ -86,7 +87,7 @@ def _parse_json_response(content: str) -> list[dict]:
     if content.startswith("```"):
         first_newline = content.find("\n")
         if first_newline != -1:
-            content = content[first_newline + 1:]
+            content = content[first_newline + 1 :]
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
@@ -192,6 +193,7 @@ def _mock_variants(
 # Variant generation (LLM path)
 # ---------------------------------------------------------------------------
 
+
 async def generate_variants(
     product_name: str,
     product_description: str,
@@ -209,7 +211,9 @@ async def generate_variants(
     Falls back to mock variants when USE_MOCK_LLM=True.
     """
     segment_id = selected_segment.get("id", "seg-unknown") if selected_segment else "seg-unknown"
-    segment_label = selected_segment.get("label", "Primary ICP") if selected_segment else "Primary ICP"
+    segment_label = (
+        selected_segment.get("label", "Primary ICP") if selected_segment else "Primary ICP"
+    )
     finding_ids = [f.get("id", "") for f in top_findings if f.get("id")]
 
     llm = _get_llm()
@@ -247,21 +251,23 @@ async def generate_variants(
         if not src_ids:
             src_ids = finding_ids[:2] if finding_ids else []
 
-        variants.append(ContentVariant(
-            id=f"var-{uuid4().hex[:8]}",
-            session_id=session_id,
-            cycle_number=cycle_number,
-            source_finding_ids=src_ids,
-            target_segment_id=segment_id,
-            intended_channel=raw_var.get("intended_channel", "email"),
-            hypothesis=raw_var.get("hypothesis", ""),
-            success_metric=raw_var.get("success_metric", "reply_rate > 5%"),
-            subject_line=raw_var.get("subject_line"),
-            body=raw_var.get("body", ""),
-            cta=raw_var.get("cta", ""),
-            angle_label=raw_var.get("angle_label"),
-            created_at=now,
-        ))
+        variants.append(
+            ContentVariant(
+                id=f"var-{uuid4().hex[:8]}",
+                session_id=session_id,
+                cycle_number=cycle_number,
+                source_finding_ids=src_ids,
+                target_segment_id=segment_id,
+                intended_channel=raw_var.get("intended_channel", "email"),
+                hypothesis=raw_var.get("hypothesis", ""),
+                success_metric=raw_var.get("success_metric", "reply_rate > 5%"),
+                subject_line=raw_var.get("subject_line"),
+                body=raw_var.get("body", ""),
+                cta=raw_var.get("cta", ""),
+                angle_label=raw_var.get("angle_label"),
+                created_at=now,
+            )
+        )
 
     return variants
 
@@ -269,6 +275,7 @@ async def generate_variants(
 # ---------------------------------------------------------------------------
 # Segment helper
 # ---------------------------------------------------------------------------
+
 
 def get_segment_by_id(
     segment_id: str | None,
@@ -282,13 +289,16 @@ def get_segment_by_id(
             if seg.get("id") == segment_id:
                 return seg
     # Fallback: use the first candidate rather than blocking
-    logger.info("get_segment_by_id: no match for '%s' — using first candidate as default", segment_id)
+    logger.info(
+        "get_segment_by_id: no match for '%s' — using first candidate as default", segment_id
+    )
     return segment_candidates[0]
 
 
 # ---------------------------------------------------------------------------
 # UI frame builder
 # ---------------------------------------------------------------------------
+
 
 def build_variant_grid_frame(variants: list[ContentVariant], instance_id: str) -> dict[str, Any]:
     """Build a VariantGrid UI frame for the WebSocket stream."""
@@ -307,7 +317,8 @@ def build_variant_grid_frame(variants: list[ContentVariant], instance_id: str) -
                 payload={"variant_id": v.id},
             )
             for v in variants
-        ] + [
+        ]
+        + [
             UIAction(
                 id="deploy-selected",
                 label="Deploy selected variants",
@@ -321,6 +332,7 @@ def build_variant_grid_frame(variants: list[ContentVariant], instance_id: str) -
 # ---------------------------------------------------------------------------
 # Main agent node
 # ---------------------------------------------------------------------------
+
 
 async def content_agent_node(state: CampaignState) -> dict:
     """Generate A/B content variants from research findings and segment data.

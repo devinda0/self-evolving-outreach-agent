@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Email deployment
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "outreach@yourdomain.com"
+    RESEND_WEBHOOK_SECRET: str = ""  # svix signing secret (whsec_...) — optional but recommended
 
     # LinkedIn deployment
     UNIPILE_API_KEY: str = ""

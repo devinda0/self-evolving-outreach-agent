@@ -1,12 +1,17 @@
 """Webhook endpoints for external provider event ingestion."""
 
+import base64
+import hashlib
+import hmac
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.core.config import settings
 from app.db.crud import (
     get_deployment_by_provider_message_id,
     get_feedback_event_by_dedupe_key,
@@ -18,6 +23,63 @@ from app.db.crud import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhooks"])
+
+
+# ---------------------------------------------------------------------------
+# Resend webhook HMAC verification (svix signing scheme)
+# ---------------------------------------------------------------------------
+
+_MAX_TIMESTAMP_SKEW_SECONDS = 300  # 5 minutes
+
+
+def _verify_resend_signature(
+    raw_body: bytes,
+    svix_id: str,
+    svix_timestamp: str,
+    svix_signature: str,
+    secret: str,
+) -> bool:
+    """Verify the svix signature on a Resend webhook.
+
+    Args:
+        raw_body: The unmodified raw request body bytes.
+        svix_id: Value of the ``svix-id`` header.
+        svix_timestamp: Value of the ``svix-timestamp`` header.
+        svix_signature: Value of the ``svix-signature`` header
+            (space-separated list of ``v1,<base64>`` items).
+        secret: The webhook signing secret in ``whsec_<base64>`` format.
+
+    Returns:
+        ``True`` when at least one provided signature matches the expected
+        HMAC and the timestamp is within the allowed skew window.
+    """
+    # Reject stale or future timestamps to mitigate replay attacks
+    try:
+        ts = int(svix_timestamp)
+    except ValueError:
+        return False
+    if abs(time.time() - ts) > _MAX_TIMESTAMP_SKEW_SECONDS:
+        return False
+
+    # Decode the webhook secret (strip optional "whsec_" prefix then base64-decode)
+    try:
+        secret_bytes = base64.b64decode(secret.removeprefix("whsec_"))
+    except Exception:  # noqa: BLE001
+        logger.error("_verify_resend_signature: unable to decode webhook secret")
+        return False
+
+    # Build the signed content exactly as Resend/svix does
+    signed_content = f"{svix_id}.{svix_timestamp}.{raw_body.decode()}"
+
+    # Compute HMAC-SHA256 and base64-encode
+    expected_sig = base64.b64encode(
+        hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
+    ).decode()
+
+    # svix_signature may contain multiple space-separated "v1,<sig>" entries
+    provided_sigs = [part.split(",", 1)[1] for part in svix_signature.split() if "," in part]
+
+    return any(hmac.compare_digest(expected_sig, sig) for sig in provided_sigs)
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +124,33 @@ def _map_unipile_event_type(unipile_type: str) -> str:
 
 @router.post("/webhook/resend")
 async def webhook_resend(request: Request) -> dict[str, str]:
-    """Ingest a Resend webhook event and normalize it."""
-    payload: dict[str, Any] = await request.json()
+    """Ingest a Resend webhook event and normalize it.
+
+    When ``RESEND_WEBHOOK_SECRET`` is configured, the svix HMAC signature is
+    verified before the payload is processed.  Requests with an invalid
+    signature are rejected with HTTP 401.
+    """
+    raw_body = await request.body()
+
+    # -- Optional HMAC verification --
+    if settings.RESEND_WEBHOOK_SECRET:
+        svix_id = request.headers.get("svix-id", "")
+        svix_timestamp = request.headers.get("svix-timestamp", "")
+        svix_signature = request.headers.get("svix-signature", "")
+
+        if not _verify_resend_signature(
+            raw_body=raw_body,
+            svix_id=svix_id,
+            svix_timestamp=svix_timestamp,
+            svix_signature=svix_signature,
+            secret=settings.RESEND_WEBHOOK_SECRET,
+        ):
+            logger.warning("webhook_resend: invalid svix signature")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    import json as _json  # avoid shadowing top-level json if any
+
+    payload: dict[str, Any] = _json.loads(raw_body)
 
     data = payload.get("data", {})
     provider_message_id = data.get("message_id") or payload.get("provider_message_id")
@@ -185,9 +272,7 @@ async def _ingest_event(
         "provider_event_id": provider_event_id or None,
         "provider_message_id": provider_message_id,
         "deployment_record_id": deployment.get("id") if deployment else None,
-        "session_id": (
-            deployment.get("session_id") if deployment else extra.get("session_id")
-        ),
+        "session_id": (deployment.get("session_id") if deployment else extra.get("session_id")),
         "variant_id": deployment.get("variant_id") if deployment else None,
         "prospect_id": deployment.get("prospect_id") if deployment else None,
         "channel": deployment.get("channel") if deployment else channel,

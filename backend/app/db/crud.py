@@ -23,6 +23,7 @@ from app.db.collections import (
 # Campaign sessions
 # ---------------------------------------------------------------------------
 
+
 async def save_campaign_state(session_id: str, state: dict[str, Any]) -> None:
     """Upsert the full campaign state for a session."""
     db = get_db()
@@ -46,6 +47,7 @@ async def load_campaign_state(session_id: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Research findings
 # ---------------------------------------------------------------------------
+
 
 async def save_research_finding(finding: dict[str, Any]) -> None:
     """Insert a single research finding.
@@ -102,6 +104,7 @@ async def update_finding_confidence(finding_id: str, delta: float) -> None:
 # Content variants
 # ---------------------------------------------------------------------------
 
+
 async def save_content_variant(variant: dict[str, Any]) -> None:
     """Insert a single content variant."""
     db = get_db()
@@ -123,6 +126,7 @@ async def get_variants_for_session(session_id: str) -> list[dict[str, Any]]:
 # Deployment records
 # ---------------------------------------------------------------------------
 
+
 async def save_deployment_record(record: dict[str, Any]) -> None:
     """Insert a single deployment record."""
     db = get_db()
@@ -134,9 +138,7 @@ async def get_deployment_by_provider_message_id(
 ) -> dict[str, Any] | None:
     """Look up a deployment record by its provider-assigned message ID (for webhook correlation)."""
     db = get_db()
-    doc = await db[DEPLOYMENT_RECORDS].find_one(
-        {"provider_message_id": provider_message_id}
-    )
+    doc = await db[DEPLOYMENT_RECORDS].find_one({"provider_message_id": provider_message_id})
     if doc is not None:
         doc.pop("_id", None)
     return doc
@@ -145,6 +147,7 @@ async def get_deployment_by_provider_message_id(
 # ---------------------------------------------------------------------------
 # Feedback events
 # ---------------------------------------------------------------------------
+
 
 async def save_feedback_event(event: dict[str, Any]) -> None:
     """Insert a normalized feedback event."""
@@ -164,9 +167,7 @@ async def get_feedback_event_by_dedupe_key(dedupe_key: str) -> dict[str, Any] | 
 async def get_feedback_events_for_session(session_id: str) -> list[dict[str, Any]]:
     """Return all normalized feedback events for a session, ordered by received_at."""
     db = get_db()
-    cursor = db[FEEDBACK_EVENTS].find({"session_id": session_id}).sort(
-        "received_at", ASCENDING
-    )
+    cursor = db[FEEDBACK_EVENTS].find({"session_id": session_id}).sort("received_at", ASCENDING)
     results = []
     async for doc in cursor:
         doc.pop("_id", None)
@@ -184,6 +185,7 @@ async def save_quarantine_event(event: dict[str, Any]) -> None:
 # Intelligence entries
 # ---------------------------------------------------------------------------
 
+
 async def save_intelligence_entry(entry: dict[str, Any]) -> None:
     """Insert a learning delta / intelligence entry."""
     db = get_db()
@@ -193,8 +195,8 @@ async def save_intelligence_entry(entry: dict[str, Any]) -> None:
 async def get_intelligence_entries(session_id: str) -> list[dict[str, Any]]:
     """Return all intelligence entries for a session, ordered by cycle_number."""
     db = get_db()
-    cursor = db[INTELLIGENCE_ENTRIES].find({"session_id": session_id}).sort(
-        "cycle_number", ASCENDING
+    cursor = (
+        db[INTELLIGENCE_ENTRIES].find({"session_id": session_id}).sort("cycle_number", ASCENDING)
     )
     results = []
     async for doc in cursor:
@@ -206,6 +208,7 @@ async def get_intelligence_entries(session_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Segments
 # ---------------------------------------------------------------------------
+
 
 async def save_segments(session_id: str, segments: list[dict[str, Any]]) -> None:
     """Replace all segments for a session."""
@@ -232,6 +235,7 @@ async def get_segments(session_id: str) -> list[dict[str, Any]]:
 # Prospect cards
 # ---------------------------------------------------------------------------
 
+
 async def save_prospect_cards(session_id: str, cards: list[dict[str, Any]]) -> None:
     """Replace all prospect cards for a session."""
     db = get_db()
@@ -245,8 +249,10 @@ async def save_prospect_cards(session_id: str, cards: list[dict[str, Any]]) -> N
 async def get_prospect_cards(session_id: str) -> list[dict[str, Any]]:
     """Return all scored prospect cards for a session, sorted by combined score desc."""
     db = get_db()
-    cursor = db[PROSPECT_CARDS].find({"session_id": session_id}).sort(
-        [("fit_score", DESCENDING), ("urgency_score", DESCENDING)]
+    cursor = (
+        db[PROSPECT_CARDS]
+        .find({"session_id": session_id})
+        .sort([("fit_score", DESCENDING), ("urgency_score", DESCENDING)])
     )
     results = []
     async for doc in cursor:
@@ -259,12 +265,11 @@ async def get_prospect_cards(session_id: str) -> list[dict[str, Any]]:
 # Tool cache
 # ---------------------------------------------------------------------------
 
+
 async def cache_tool_result(key: str, value: Any, ttl_seconds: int) -> None:
     """Upsert a cached tool result with a TTL-based expiry."""
     db = get_db()
-    expires_at = datetime.fromtimestamp(
-        _now().timestamp() + ttl_seconds, tz=timezone.utc
-    )
+    expires_at = datetime.fromtimestamp(_now().timestamp() + ttl_seconds, tz=timezone.utc)
     await db[TOOL_CACHE].find_one_and_update(
         {"key": key},
         {"$set": {"key": key, "value": value, "expires_at": expires_at}},
@@ -276,9 +281,7 @@ async def cache_tool_result(key: str, value: Any, ttl_seconds: int) -> None:
 async def get_cached_tool_result(key: str) -> Any | None:
     """Return a cached value if it exists and hasn't expired. Returns None otherwise."""
     db = get_db()
-    doc = await db[TOOL_CACHE].find_one(
-        {"key": key, "expires_at": {"$gt": _now()}}
-    )
+    doc = await db[TOOL_CACHE].find_one({"key": key, "expires_at": {"$gt": _now()}})
     if doc is not None:
         return doc.get("value")
     return None
@@ -287,6 +290,7 @@ async def get_cached_tool_result(key: str) -> Any | None:
 # ---------------------------------------------------------------------------
 # Indexes
 # ---------------------------------------------------------------------------
+
 
 async def create_indexes() -> None:
     """Create required indexes. Safe to call repeatedly — MongoDB is idempotent for this."""
@@ -300,9 +304,7 @@ async def create_indexes() -> None:
     await db[FEEDBACK_EVENTS].create_index("dedupe_key", unique=True)
     await db[TOOL_CACHE].create_index("expires_at", expireAfterSeconds=0)
     await db[SEGMENTS].create_index("session_id")
-    await db[PROSPECT_CARDS].create_index(
-        [("session_id", ASCENDING), ("fit_score", DESCENDING)]
-    )
+    await db[PROSPECT_CARDS].create_index([("session_id", ASCENDING), ("fit_score", DESCENDING)])
     await db[INTELLIGENCE_ENTRIES].create_index(
         [("session_id", ASCENDING), ("cycle_number", ASCENDING)]
     )
@@ -311,6 +313,7 @@ async def create_indexes() -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _now() -> datetime:
     return datetime.now(tz=timezone.utc)

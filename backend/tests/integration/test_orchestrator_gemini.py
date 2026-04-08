@@ -106,7 +106,7 @@ async def test_generate_intent_real_gemini():
             {"role": "user", "content": "research competitors"},
             {"role": "assistant", "content": "Research complete. Here's the briefing..."},
             {"role": "user", "content": "write me 3 cold email variants targeting SMB founders"},
-        ]
+        ],
     )
 
     result = await orchestrator_node(state)
@@ -120,7 +120,10 @@ async def test_segment_intent_real_gemini():
     """Gemini correctly classifies prospect/segment selection request."""
     state = _make_state(
         messages=[
-            {"role": "user", "content": "I want to select prospects from the Series A SaaS segment"},
+            {
+                "role": "user",
+                "content": "I want to select prospects from the Series A SaaS segment",
+            },
         ]
     )
 
@@ -140,7 +143,7 @@ async def test_deploy_intent_real_gemini():
             {"role": "user", "content": "generate email variants"},
             {"role": "assistant", "content": "Here are 3 variants: A, B, C..."},
             {"role": "user", "content": "send variant A to all selected prospects via email"},
-        ]
+        ],
     )
 
     result = await orchestrator_node(state)
@@ -158,8 +161,11 @@ async def test_feedback_intent_real_gemini():
         messages=[
             {"role": "user", "content": "deploy campaign"},
             {"role": "assistant", "content": "Campaign sent to 50 prospects..."},
-            {"role": "user", "content": "variant A got 45% open rate and 8 replies, variant B got 30% open rate and 2 replies"},
-        ]
+            {
+                "role": "user",
+                "content": "variant A got 45% open rate and 8 replies, variant B got 30% open rate and 2 replies",
+            },
+        ],
     )
 
     result = await orchestrator_node(state)
@@ -196,7 +202,7 @@ async def test_context_aware_classification():
             {"role": "user", "content": "research my competitors"},
             {"role": "assistant", "content": "I found 5 key insights about your competitors..."},
             {"role": "user", "content": "now write some content"},
-        ]
+        ],
     )
 
     result = await orchestrator_node(state)
@@ -215,8 +221,11 @@ async def test_intent_override():
         messages=[
             {"role": "user", "content": "write email variants"},
             {"role": "assistant", "content": "Generating variants..."},
-            {"role": "user", "content": "actually, go back to research mode - I want more competitor data"},
-        ]
+            {
+                "role": "user",
+                "content": "actually, go back to research mode - I want more competitor data",
+            },
+        ],
     )
 
     result = await orchestrator_node(state)
@@ -235,7 +244,7 @@ async def test_refined_cycle_intent():
         active_stage_summary="cycle 1 complete",
         messages=[
             {"role": "user", "content": "let's start a new cycle and apply what we learned"},
-        ]
+        ],
     )
 
     result = await orchestrator_node(state)
@@ -261,7 +270,9 @@ async def test_multiple_intents_batch():
             "expected_intent": "deploy",
         },
         {
-            "messages": [{"role": "user", "content": "email A had 50% opens, email B had 20% opens"}],
+            "messages": [
+                {"role": "user", "content": "email A had 50% opens, email B had 20% opens"}
+            ],
             "expected_intent": "feedback",
         },
         {
@@ -281,9 +292,7 @@ async def test_multiple_intents_batch():
 @pytest.mark.integration
 async def test_json_output_format():
     """Gemini returns properly structured output."""
-    state = _make_state(
-        messages=[{"role": "user", "content": "research competitors"}]
-    )
+    state = _make_state(messages=[{"role": "user", "content": "research competitors"}])
 
     result = await orchestrator_node(state)
 
@@ -295,9 +304,25 @@ async def test_json_output_format():
     assert isinstance(result["intent_history"], list)
 
     # Intent should be valid
-    valid_intents = {"research", "segment", "generate", "deploy", "feedback", "refined_cycle", "clarify"}
+    valid_intents = {
+        "research",
+        "segment",
+        "generate",
+        "deploy",
+        "feedback",
+        "refined_cycle",
+        "clarify",
+    }
     assert result["current_intent"] in valid_intents
 
     # next_node should be valid
-    valid_nodes = {"research", "segment", "generate", "deploy", "feedback", "clarify", "orchestrator"}
+    valid_nodes = {
+        "research",
+        "segment",
+        "generate",
+        "deploy",
+        "feedback",
+        "clarify",
+        "orchestrator",
+    }
     assert result["next_node"] in valid_nodes

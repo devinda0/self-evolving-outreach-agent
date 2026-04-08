@@ -18,6 +18,7 @@ TEST_DB = "signal_to_action_test"
 # REST: POST /campaign/start
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_start_campaign():
     transport = ASGITransport(app=app)
@@ -40,6 +41,7 @@ async def test_start_campaign():
 # ---------------------------------------------------------------------------
 # REST: GET /campaign/{session_id}/state
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_get_campaign_state():
@@ -79,6 +81,7 @@ async def test_get_campaign_state_not_found():
 # REST: POST /campaign/{session_id}/ui-action
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_ui_action_endpoint():
     transport = ASGITransport(app=app)
@@ -112,6 +115,7 @@ async def test_ui_action_endpoint():
 # REST: GET /health
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_health():
     transport = ASGITransport(app=app)
@@ -127,6 +131,7 @@ async def test_health():
 # ---------------------------------------------------------------------------
 # WebSocket: /ws/campaign/{session_id}
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_websocket_echo():

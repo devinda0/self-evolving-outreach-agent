@@ -41,17 +41,19 @@ async def _send_json_safe(websocket: WebSocket, data: Any) -> None:
 _graph: CompiledStateGraph | None = None
 
 # Progress-emitting node names (used to filter astream_events)
-_PROGRESS_NODES = frozenset({
-    "orchestrator",
-    "research_dispatcher",
-    "research_thread",
-    "research_synthesizer",
-    "segment_agent",
-    "content_agent",
-    "deployment_agent",
-    "feedback_agent",
-    "clarify",
-})
+_PROGRESS_NODES = frozenset(
+    {
+        "orchestrator",
+        "research_dispatcher",
+        "research_thread",
+        "research_synthesizer",
+        "segment_agent",
+        "content_agent",
+        "deployment_agent",
+        "feedback_agent",
+        "clarify",
+    }
+)
 
 
 def _get_or_init_graph() -> CompiledStateGraph:
@@ -76,6 +78,7 @@ def reset_graph() -> None:
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+
 class StartCampaignRequest(BaseModel):
     product_name: str
     product_description: str
@@ -95,6 +98,7 @@ class UIActionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _new_campaign_state(session_id: str, req: StartCampaignRequest) -> dict[str, Any]:
     """Return a fresh CampaignState dict for a new session."""
@@ -238,6 +242,7 @@ _INTENT_TO_USER_MESSAGE: dict[str, str] = {
 # Core graph invocation helpers
 # ---------------------------------------------------------------------------
 
+
 async def _run_graph_for_message(
     websocket: WebSocket,
     session_id: str,
@@ -280,18 +285,21 @@ async def _run_graph_for_message(
             if event_type == "on_chain_start":
                 node_name = event.get("name", "")
                 if node_name in _PROGRESS_NODES:
-                    await websocket.send_json({
-                        "type": "progress",
-                        "stage": node_name,
-                        "message": f"Running {node_name}…",
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "progress",
+                            "stage": node_name,
+                            "message": f"Running {node_name}…",
+                        }
+                    )
 
             # Forward streaming LLM tokens — skip internal nodes (orchestrator, clarify)
             elif event_type == "on_chat_model_stream":
                 meta = event.get("metadata", {})
                 node = (
-                    meta.get("langgraph_node", "")
-                    or event.get("tags", [""])[0] if event.get("tags") else ""
+                    meta.get("langgraph_node", "") or event.get("tags", [""])[0]
+                    if event.get("tags")
+                    else ""
                 )
                 # Skip nodes that produce structured JSON, not user-facing prose
                 if node in ("orchestrator", "clarify", "content_agent", "deployment_agent"):
@@ -302,10 +310,12 @@ async def _run_graph_for_message(
 
     except GraphRecursionError:
         logger.error("Graph recursion limit reached | session=%s", session_id)
-        await websocket.send_json({
-            "type": "error",
-            "message": "Processing limit reached — try a more specific request.",
-        })
+        await websocket.send_json(
+            {
+                "type": "error",
+                "message": "Processing limit reached — try a more specific request.",
+            }
+        )
         return
     except Exception:
         logger.exception("Graph execution error | session=%s", session_id)
@@ -343,16 +353,19 @@ async def _apply_ui_action(
         except Exception:
             logger.warning("Could not update graph state for action '%s'", action_id, exc_info=True)
 
-    return [{
-        "type": "progress",
-        "stage": "ui_action",
-        "message": f"Action applied: {action_id}",
-    }]
+    return [
+        {
+            "type": "progress",
+            "stage": "ui_action",
+            "message": f"Action applied: {action_id}",
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/campaign/start", response_model=StartCampaignResponse)
 async def start_campaign(req: StartCampaignRequest) -> StartCampaignResponse:
@@ -369,6 +382,7 @@ async def get_campaign_state(session_id: str) -> dict[str, Any]:
     state = await load_campaign_state(session_id)
     if state is None:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Session not found")
     return state
 
@@ -379,15 +393,19 @@ async def post_ui_action(session_id: str, action: UIActionRequest) -> dict[str, 
     state = await load_campaign_state(session_id)
     if state is None:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Session not found")
 
-    frames = await _apply_ui_action(session_id, _normalize_action_id(action.action_id), action.payload)
+    frames = await _apply_ui_action(
+        session_id, _normalize_action_id(action.action_id), action.payload
+    )
     return {"frames": frames}
 
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/ws/campaign/{session_id}")
 async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
@@ -449,7 +467,9 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                         try:
                             await graph.aupdate_state(cfg, pre_delta)  # type: ignore[arg-type]
                         except Exception:
-                            logger.warning("Could not pre-patch state for '%s'", action_id, exc_info=True)
+                            logger.warning(
+                                "Could not pre-patch state for '%s'", action_id, exc_info=True
+                            )
                     await _run_graph_for_message(websocket, session_id, synthetic_msg, db_state)
                 else:
                     # Simple state-only updates (segment select, prospect confirm)

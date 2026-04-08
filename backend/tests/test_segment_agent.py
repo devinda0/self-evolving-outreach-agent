@@ -20,6 +20,7 @@ from app.models.prospect import Segment
 # Minimal helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_segment(**overrides) -> Segment:
     defaults = {
         "id": "seg-test-1",
@@ -59,6 +60,7 @@ def _make_prospect(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 # Segment derivation
 # ---------------------------------------------------------------------------
+
 
 class TestDeriveSegments:
     async def test_derives_at_least_2_segments(self):
@@ -117,6 +119,7 @@ class TestDeriveSegments:
 # Prospect loading
 # ---------------------------------------------------------------------------
 
+
 class TestLoadProspects:
     async def test_no_ref_loads_demo_seed(self):
         prospects = await load_prospects(None)
@@ -156,6 +159,7 @@ class TestLoadProspects:
 # ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
+
 
 class TestFitScore:
     def test_leadership_title_boosts_score(self):
@@ -292,6 +296,7 @@ class TestScoreProspects:
 # Prospect cards
 # ---------------------------------------------------------------------------
 
+
 class TestBuildProspectCard:
     def test_card_has_required_fields(self):
         scored = {
@@ -335,6 +340,7 @@ class TestBuildProspectCard:
 # UI frames
 # ---------------------------------------------------------------------------
 
+
 class TestUIFrames:
     def test_segment_selector_frame(self):
         segments = [
@@ -362,6 +368,7 @@ class TestUIFrames:
 # Integration: full agent node (without DB)
 # ---------------------------------------------------------------------------
 
+
 class TestSegmentAgentNodeUnit:
     """Test the full segment_agent_node function by mocking DB calls."""
 
@@ -377,8 +384,7 @@ class TestSegmentAgentNodeUnit:
             "product_description": "A test product",
             "target_market": "Developers",
             "briefing_summary": "Market is growing",
-            "research_findings": _make_findings(4, "competitor")
-            + _make_findings(2, "audience"),
+            "research_findings": _make_findings(4, "competitor") + _make_findings(2, "audience"),
             "prospect_pool_ref": None,
         }
 
