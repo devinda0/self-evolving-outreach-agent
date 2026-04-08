@@ -15,18 +15,18 @@ Run with:
     pytest -m integration tests/integration/test_research_e2e.py -v
 """
 
-import pytest
-from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
 
-from app.agents.graph import build_graph, research_fan_out
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.agents.graph import research_fan_out
 from app.agents.research import (
     research_dispatcher_node,
     research_synthesizer_node,
     research_thread_node,
 )
 from app.db.client import close_db, connect_db, get_db
-from app.db.collections import RESEARCH_FINDINGS
 from app.db.crud import (
     create_indexes,
     get_top_findings,

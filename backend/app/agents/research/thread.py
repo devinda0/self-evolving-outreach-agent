@@ -8,6 +8,7 @@ objects using Gemini.
 import json
 import logging
 from datetime import datetime, timezone
+from typing import cast
 from uuid import uuid4
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -15,7 +16,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.core.config import settings
 from app.models.campaign_state import CampaignState
 from app.tools.research_policy import DEFAULT_RESEARCH_POLICY
-from app.tools.search import extract_page, search_community, search_news, search_web
+from app.tools.search import extract_page, search_web
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +258,7 @@ def should_branch(lead: dict, policy: dict, current_depth: int) -> bool:
 
 async def research_dispatcher_node(state: CampaignState) -> dict:
     """Prepare the thread list for fan-out based on policy."""
-    policy = state.get("research_policy", DEFAULT_RESEARCH_POLICY)
+    policy: dict = cast(dict, state.get("research_policy") or DEFAULT_RESEARCH_POLICY)
     thread_types = policy.get("enabled_threads", ["competitor", "audience", "channel", "market"])
     logger.info(
         "research_dispatcher_node | session=%s threads=%s",
@@ -273,11 +274,11 @@ async def research_thread_node(state: CampaignState) -> dict:
     This node is invoked in parallel via Send for each thread type.
     On failure, records the thread in failed_threads and returns empty findings.
     """
-    thread_type = state.get("thread_type", "unknown")
+    thread_type: str = state.get("thread_type") or "unknown"
     session_id = state.get("session_id", "unknown")
     product_name = state.get("product_name", "")
     target_market = state.get("target_market", "")
-    policy = state.get("research_policy", DEFAULT_RESEARCH_POLICY)
+    policy: dict = cast(dict, state.get("research_policy") or DEFAULT_RESEARCH_POLICY)
 
     logger.info("research_thread_node | session=%s thread=%s", session_id, thread_type)
 

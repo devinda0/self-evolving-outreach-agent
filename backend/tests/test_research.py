@@ -12,14 +12,11 @@ Covers:
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.agents.research.synthesizer import (
     _deduplicate_findings,
     _mock_briefing,
     _thread_summary,
     research_synthesizer_node,
-    synthesize_briefing,
 )
 from app.agents.research.thread import (
     _mock_findings,
@@ -30,7 +27,6 @@ from app.agents.research.thread import (
     should_branch,
     synthesize_thread_findings,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
