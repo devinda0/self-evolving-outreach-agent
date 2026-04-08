@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface ContentVariant {
   id: string;
@@ -234,6 +235,7 @@ export default function VariantGrid({ frame, onAction }: Props) {
   const variants = (frame.props.variants as ContentVariant[]) ?? [];
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const confirmAction = frame.actions.find(
     (a: UIAction) =>
@@ -509,20 +511,33 @@ export default function VariantGrid({ frame, onAction }: Props) {
           flexWrap: "wrap",
         }}
       >
-        <button type="button" className="btn-ghost" onClick={handleSelectAll}>
+        <button type="button" className="btn-ghost" onClick={handleSelectAll} disabled={isPendingAction}>
           Select All
         </button>
-        <button type="button" className="btn-ghost" onClick={handleClearAll}>
+        <button type="button" className="btn-ghost" onClick={handleClearAll} disabled={isPendingAction}>
           Clear
         </button>
         <button
           type="button"
           className="btn-accent"
-          disabled={selected.size === 0}
+          disabled={selected.size === 0 || isPendingAction}
           onClick={handleConfirm}
-          style={{ marginLeft: "auto", opacity: selected.size === 0 ? 0.4 : 1 }}
+          style={{
+            marginLeft: "auto",
+            opacity: selected.size === 0 || isPendingAction ? 0.4 : 1,
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
         >
-          Confirm Selected Variants ({selected.size})
+          {isPendingAction ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Queuing…
+            </>
+          ) : (
+            `Confirm Selected Variants (${selected.size})`
+          )}
         </button>
       </div>
     </div>

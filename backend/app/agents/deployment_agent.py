@@ -184,7 +184,21 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     - prospect_cards and selected_prospect_ids must be present
     """
     session_id = state.get("session_id", "")
-    logger.info("deployment_agent_node called | session=%s", session_id)
+    all_variants_count = len(state.get("content_variants", []))
+    selected_variant_ids = state.get("selected_variant_ids", [])
+    all_prospects_count = len(state.get("prospect_cards", []))
+    selected_prospect_ids_count = len(state.get("selected_prospect_ids", []))
+    deployment_confirmed = state.get("deployment_confirmed", False)
+    logger.info(
+        "deployment_agent_node called | session=%s variants=%d selected_variants=%d "
+        "prospects=%d selected_prospects=%d confirmed=%s",
+        session_id,
+        all_variants_count,
+        len(selected_variant_ids),
+        all_prospects_count,
+        selected_prospect_ids_count,
+        deployment_confirmed,
+    )
 
     # -- Resolve selected variants --
     all_variants = state.get("content_variants", [])
@@ -209,6 +223,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         logger.warning("deployment_agent_node: no variants available | session=%s", session_id)
         return {
             "next_node": "orchestrator",
+            "session_complete": True,
             "error_messages": [
                 "No content variants found. Please generate content before deploying."
             ],
@@ -218,6 +233,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         logger.warning("deployment_agent_node: no prospects available | session=%s", session_id)
         return {
             "next_node": "orchestrator",
+            "session_complete": True,
             "error_messages": [
                 "No prospects found. Please run segmentation before deploying."
             ],
@@ -284,7 +300,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         )
 
         await save_deployment_record(record.model_dump())
-        deployment_records.append(record.model_dump())
+        deployment_records.append(record.model_dump(mode="json"))
 
     # -- Emit DeliveryStatusCard --
     status_frame = build_delivery_status_frame(
@@ -302,5 +318,6 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         "deployment_records": deployment_records,
         "deployment_confirmed": False,  # reset for next cycle
         "next_node": "orchestrator",
+        "session_complete": True,
         "pending_ui_frames": [status_frame],
     }

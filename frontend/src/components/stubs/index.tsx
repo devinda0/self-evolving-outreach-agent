@@ -9,18 +9,12 @@ export { default as SegmentSelector } from "../SegmentSelector";
 export { default as ProspectPicker } from "../ProspectPicker";
 export { default as VariantGrid } from "../VariantGrid";
 export { default as ChannelSelector } from "../ChannelSelector";
+export { default as DeploymentConfirm } from "../DeploymentConfirm";
+export { default as DeliveryStatusCard } from "../DeliveryStatusCard";
 
 interface Props {
   frame: UIFrame;
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
-}
-
-export function DeploymentConfirm(props: Props) {
-  return <StubComponent {...props} />;
-}
-
-export function DeliveryStatusCard(props: Props) {
-  return <StubComponent {...props} />;
 }
 
 export function ABResults(props: Props) {

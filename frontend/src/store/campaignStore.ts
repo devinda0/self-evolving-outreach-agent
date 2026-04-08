@@ -37,6 +37,7 @@ interface CampaignStore {
   sessionId: string | null;
   messages: Message[];
   isStreaming: boolean;
+  isPendingAction: boolean;
   currentStage: string | null;
   wsStatus: WsStatus;
 
@@ -45,6 +46,7 @@ interface CampaignStore {
   appendToken: (token: string) => void;
   addUIFrame: (frame: UIFrame) => void;
   setStreaming: (val: boolean) => void;
+  setPendingAction: (val: boolean) => void;
   setWsStatus: (status: WsStatus) => void;
   setCurrentStage: (stage: string | null) => void;
   addErrorMessage: (message: string) => void;
@@ -60,6 +62,7 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
   sessionId: null,
   messages: [],
   isStreaming: false,
+  isPendingAction: false,
   currentStage: null,
   wsStatus: "disconnected",
 
@@ -105,6 +108,7 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
     })),
 
   setStreaming: (val) => set({ isStreaming: val }),
+  setPendingAction: (val) => set({ isPendingAction: val }),
   setWsStatus: (status) => set({ wsStatus: status }),
   setCurrentStage: (stage) => set({ currentStage: stage }),
 

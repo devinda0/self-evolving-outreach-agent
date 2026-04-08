@@ -71,4 +71,4 @@ class CampaignState(TypedDict):
     error_messages: list[str]
 
     # UI frame queue — agents append dicts here; the WS handler drains and sends them
-    pending_ui_frames: list[dict]
+    pending_ui_frames: Annotated[list, operator.add]

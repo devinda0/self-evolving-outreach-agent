@@ -8,6 +8,7 @@ import {
   VariantGrid,
   ChannelSelector,
   DeploymentConfirm,
+  DeliveryStatusCard,
   ABResults,
   CycleSummary,
   ResearchProgress,
@@ -227,6 +228,8 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <ChannelSelector {...props} />;
     case "DeploymentConfirm":
       return <DeploymentConfirm {...props} />;
+    case "DeliveryStatusCard":
+      return <DeliveryStatusCard {...props} />;
     case "ABResults":
       return <ABResults {...props} />;
     case "CycleSummary":
