@@ -189,11 +189,8 @@ class MemoryManager:
         else:
             try:
                 response = await llm.ainvoke(summary_prompt)
-                summary_text = (
-                    response.content
-                    if hasattr(response, "content")
-                    else str(response)
-                )
+                raw_content = response.content if hasattr(response, "content") else response
+                summary_text = raw_content if isinstance(raw_content, str) else str(raw_content)
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "maybe_summarize_conversation: LLM call failed (%s) — skipping summary",
