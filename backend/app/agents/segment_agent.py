@@ -421,9 +421,9 @@ async def segment_agent_node(state: CampaignState) -> dict:
     await save_segments(session_id, [s.model_dump() for s in segments])
     await save_prospect_cards(session_id, scored)
 
-    # Step 6: Build UI frames (built for future WS streaming; not yet wired into state)
-    build_segment_selector_frame(segments, f"seg-selector-{session_id[:8]}")
-    build_prospect_picker_frame(cards, f"prospect-picker-{session_id[:8]}")
+    # Step 6: Build UI frames and include in state for the WS handler to drain
+    segment_frame = build_segment_selector_frame(segments, f"seg-selector-{session_id[:8]}")
+    prospect_frame = build_prospect_picker_frame(cards, f"prospect-picker-{session_id[:8]}")
 
     logger.info(
         "segment_agent_node completed | session=%s segments=%d prospects=%d",
@@ -436,4 +436,6 @@ async def segment_agent_node(state: CampaignState) -> dict:
         "segment_candidates": [s.model_dump() for s in segments],
         "prospect_cards": cards,
         "next_node": "orchestrator",
+        "session_complete": True,
+        "pending_ui_frames": [segment_frame, prospect_frame],
     }

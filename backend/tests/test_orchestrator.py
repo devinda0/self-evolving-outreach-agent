@@ -443,7 +443,7 @@ class TestClarifyNode:
         result = await clarify_node(state)
 
         # Check pending UI frames
-        frames = result.get("_pending_ui_frames", [])
+        frames = result.get("pending_ui_frames", [])
         assert len(frames) == 1
 
         frame = frames[0]
@@ -472,8 +472,8 @@ class TestClarifyNode:
         result1 = await clarify_node(state)
         result2 = await clarify_node(state)
 
-        frame1 = result1["_pending_ui_frames"][0]
-        frame2 = result2["_pending_ui_frames"][0]
+        frame1 = result1["pending_ui_frames"][0]
+        frame2 = result2["pending_ui_frames"][0]
 
         assert frame1["instance_id"] != frame2["instance_id"]
         assert frame1["instance_id"].startswith("clarify_")

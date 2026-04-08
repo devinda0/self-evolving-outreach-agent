@@ -100,11 +100,13 @@ def _get_llm():
     )
 
 
-def format_messages(messages: list[dict[str, Any]]) -> str:
+def format_messages(messages: list[Any]) -> str:
     """Format messages for the prompt context.
 
+    Accepts both plain dicts (role/content keys) and LangChain BaseMessage objects.
+
     Args:
-        messages: List of message dictionaries with role and content.
+        messages: List of messages (dicts or BaseMessage objects).
 
     Returns:
         Formatted string of messages.
@@ -114,8 +116,14 @@ def format_messages(messages: list[dict[str, Any]]) -> str:
 
     lines = []
     for msg in messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
+        # Handle LangChain BaseMessage objects (HumanMessage, AIMessage, etc.)
+        if hasattr(msg, "type") and hasattr(msg, "content"):
+            role = msg.type  # "human", "ai", "system"
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        else:
+            # Plain dict fallback
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
         # Truncate very long messages
         if len(content) > 500:
             content = content[:500] + "..."
@@ -366,6 +374,6 @@ async def clarify_node(state: CampaignState) -> dict[str, Any]:
         "active_stage_summary": "awaiting clarification",
         "clarification_question": question,
         "clarification_options": options,
-        # Store the serialized UI frame for the API to stream
-        "_pending_ui_frames": [ui_frame.model_dump()],
+        "session_complete": True,
+        "pending_ui_frames": [ui_frame.model_dump()],
     }

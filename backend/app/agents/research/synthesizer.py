@@ -227,7 +227,8 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
         "briefing_summary": briefing.get("executive_summary", ""),
         "research_gaps": briefing.get("gaps", []),
         "active_stage_summary": "research complete — briefing ready",
-        "_pending_ui_frames": [ui_frame.model_dump()],
+        "session_complete": True,
+        "pending_ui_frames": [ui_frame.model_dump()],
     }
 
 

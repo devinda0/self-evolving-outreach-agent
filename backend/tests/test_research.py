@@ -283,9 +283,9 @@ class TestResearchSynthesizer:
         assert "briefing_summary" in result
         assert len(result["briefing_summary"]) > 0
         assert "research_gaps" in result
-        assert "_pending_ui_frames" in result
+        assert "pending_ui_frames" in result
 
-        frame = result["_pending_ui_frames"][0]
+        frame = result["pending_ui_frames"][0]
         assert frame["component"] == "BriefingCard"
         assert frame["props"]["finding_count"] == 2
         assert len(frame["actions"]) == 3

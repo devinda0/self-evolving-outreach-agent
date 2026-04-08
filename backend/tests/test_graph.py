@@ -201,8 +201,8 @@ async def test_research_synthesizer_node_returns_briefing():
     assert "briefing_summary" in result
     assert len(result["briefing_summary"]) > 0
     assert "research_gaps" in result
-    assert "_pending_ui_frames" in result
-    assert result["_pending_ui_frames"][0]["component"] == "BriefingCard"
+    assert "pending_ui_frames" in result
+    assert result["pending_ui_frames"][0]["component"] == "BriefingCard"
 
 
 async def test_segment_agent_node_returns_candidates():
@@ -236,7 +236,7 @@ async def test_clarify_node_returns_question():
     result = await clarify_node(_make_state())
     assert "clarification_question" in result
     assert result["active_stage_summary"] == "awaiting clarification"
-    assert "_pending_ui_frames" in result
+    assert "pending_ui_frames" in result
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ async def test_graph_research_route():
             _make_state(research_findings=all_findings)
         )
     assert len(synth_result["briefing_summary"]) > 0
-    assert "_pending_ui_frames" in synth_result
+    assert "pending_ui_frames" in synth_result
 
 
 async def test_graph_generate_route_via_content_node():
