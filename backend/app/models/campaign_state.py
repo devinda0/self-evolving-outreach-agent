@@ -72,3 +72,6 @@ class CampaignState(TypedDict):
 
     # UI frame queue — agents append dicts here; the WS handler drains and sends them
     pending_ui_frames: Annotated[list, operator.add]
+
+    # Internal summarisation tracking — index into messages list covered by last summary
+    _last_summary_message_count: int

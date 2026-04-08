@@ -9,6 +9,8 @@ Tests cover:
 - enforce_token_budget truncates correctly
 - _get_compact_prospect_cards filters by selection correctly
 - build_context_bundle logs approximate token count
+- maybe_summarize_node: standalone graph node triggers/no-ops correctly
+- log_decision: appends typed entries to decision log
 """
 
 import logging
@@ -19,8 +21,13 @@ import pytest
 from app.memory.manager import (
     _ORCHESTRATOR_MESSAGE_WINDOW,
     AGENT_TOKEN_BUDGETS,
+    RESUMMARIZE_EVERY_N,
+    SUMMARIZATION_THRESHOLD,
+    VERBATIM_KEEP_LAST_N,
     MemoryManager,
     enforce_token_budget,
+    log_decision,
+    maybe_summarize_node,
 )
 
 # ---------------------------------------------------------------------------
@@ -134,6 +141,7 @@ def _make_state(**overrides) -> dict:
         "memory_refs": {},
         "error_messages": [],
         "pending_ui_frames": [],
+        "_last_summary_message_count": 0,
     }
     base.update(overrides)
     return base
@@ -647,6 +655,159 @@ class TestBundleSizeLogging:
         token_logs = [m for m in log_messages if "approx_tokens" in m]
         assert len(token_logs) == 1, f"Expected 1 token log, got: {token_logs}"
         assert "orchestrator" in token_logs[0]
+
+
+# ---------------------------------------------------------------------------
+# maybe_summarize_node (standalone graph node)
+# ---------------------------------------------------------------------------
+
+
+class TestMaybeSummarizeNode:
+    def _make_messages(self, n: int) -> list[dict]:
+        return [{"role": "user" if i % 2 == 0 else "ai", "content": f"Message {i}"} for i in range(n)]
+
+    @pytest.mark.asyncio
+    async def test_no_op_below_threshold(self):
+        """Node returns empty dict when message count ≤ SUMMARIZATION_THRESHOLD."""
+        state = _make_state(messages=self._make_messages(SUMMARIZATION_THRESHOLD))
+        result = await maybe_summarize_node(state)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_no_op_at_exactly_threshold(self):
+        state = _make_state(messages=self._make_messages(20))
+        result = await maybe_summarize_node(state)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_summary_triggered_with_25_messages(self):
+        """With 25 messages and no prior summary, the node must produce a summary."""
+        state = _make_state(messages=self._make_messages(25), _last_summary_message_count=0)
+        result = await maybe_summarize_node(state)
+
+        assert "conversation_summary" in result
+        assert result["conversation_summary"]
+
+    @pytest.mark.asyncio
+    async def test_decision_log_entry_written(self):
+        """Node appends a 'summary' entry to decision_log."""
+        state = _make_state(messages=self._make_messages(25), _last_summary_message_count=0)
+        result = await maybe_summarize_node(state)
+
+        assert "decision_log" in result
+        entry = result["decision_log"][-1]
+        assert entry["type"] == "conversation_summary"
+        assert "id" in entry
+        assert "created_at" in entry
+
+    @pytest.mark.asyncio
+    async def test_last_summary_message_count_updated(self):
+        """Node writes _last_summary_message_count = len(messages) - VERBATIM_KEEP_LAST_N."""
+        messages = self._make_messages(25)
+        state = _make_state(messages=messages, _last_summary_message_count=0)
+        result = await maybe_summarize_node(state)
+
+        expected_coverage = len(messages) - VERBATIM_KEEP_LAST_N  # 25 - 8 = 17
+        assert result["_last_summary_message_count"] == expected_coverage
+
+    @pytest.mark.asyncio
+    async def test_no_op_when_insufficient_new_messages_since_last_summary(self):
+        """Node is a no-op when fewer than RESUMMARIZE_EVERY_N new messages since last summary."""
+        messages = self._make_messages(25)
+        # last_coverage set so only (RESUMMARIZE_EVERY_N - 2) new messages remain → no-op
+        # new_messages = 25 - last_coverage = RESUMMARIZE_EVERY_N - 2 < RESUMMARIZE_EVERY_N
+        last_coverage = len(messages) - (RESUMMARIZE_EVERY_N - 2)
+        state = _make_state(messages=messages, _last_summary_message_count=last_coverage)
+        result = await maybe_summarize_node(state)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_resummarizes_after_enough_new_messages(self):
+        """Node triggers when RESUMMARIZE_EVERY_N or more messages accumulated since last summary."""
+        messages = self._make_messages(30)
+        # last summary covered 10 messages; 30 - 10 = 20 >= RESUMMARIZE_EVERY_N (10)
+        state = _make_state(messages=messages, _last_summary_message_count=RESUMMARIZE_EVERY_N)
+        result = await maybe_summarize_node(state)
+
+        assert "conversation_summary" in result
+        assert result["conversation_summary"]
+
+    @pytest.mark.asyncio
+    async def test_covers_correct_message_range(self):
+        """Summary covers messages from last_coverage to len(messages) - VERBATIM_KEEP_LAST_N."""
+        messages = self._make_messages(25)
+        state = _make_state(messages=messages, _last_summary_message_count=0)
+        result = await maybe_summarize_node(state)
+
+        entry = result["decision_log"][-1]
+        # For 25 messages, last_coverage=0: covers_message_range should be [0, 17]
+        assert "covers_messages" in entry
+        assert entry["covers_messages"] == 25 - VERBATIM_KEEP_LAST_N
+
+
+# ---------------------------------------------------------------------------
+# log_decision
+# ---------------------------------------------------------------------------
+
+
+class TestLogDecision:
+    def test_appends_segment_selected_entry(self):
+        state = _make_state(decision_log=[])
+        patch = log_decision(state, {"type": "segment_selected", "segment_id": "seg-001", "label": "VP Sales"})
+        log = patch["decision_log"]
+        assert len(log) == 1
+        entry = log[0]
+        assert entry["type"] == "segment_selected"
+        assert entry["segment_id"] == "seg-001"
+        assert entry["label"] == "VP Sales"
+        assert "id" in entry
+        assert "created_at" in entry
+
+    def test_appends_variants_selected_entry(self):
+        state = _make_state(decision_log=[])
+        patch = log_decision(state, {"type": "variants_selected", "variant_ids": ["var-001", "var-002"]})
+        entry = patch["decision_log"][0]
+        assert entry["type"] == "variants_selected"
+        assert entry["variant_ids"] == ["var-001", "var-002"]
+
+    def test_appends_deployment_confirmed_entry(self):
+        state = _make_state(decision_log=[])
+        patch = log_decision(state, {"type": "deployment_confirmed", "prospect_count": 10})
+        entry = patch["decision_log"][0]
+        assert entry["type"] == "deployment_confirmed"
+        assert entry["prospect_count"] == 10
+
+    def test_appends_cycle_complete_entry(self):
+        state = _make_state(decision_log=[])
+        patch = log_decision(state, {"type": "cycle_complete", "cycle": 2, "winner_id": "var-002"})
+        entry = patch["decision_log"][0]
+        assert entry["type"] == "cycle_complete"
+        assert entry["cycle"] == 2
+        assert entry["winner_id"] == "var-002"
+
+    def test_preserves_existing_log_entries(self):
+        existing = [{"id": "existing-1", "type": "summary", "created_at": "2026-01-01"}]
+        state = _make_state(decision_log=existing)
+        patch = log_decision(state, {"type": "segment_selected", "segment_id": "seg-001", "label": "X"})
+        log = patch["decision_log"]
+        assert len(log) == 2
+        assert log[0]["id"] == "existing-1"
+        assert log[1]["type"] == "segment_selected"
+
+    def test_each_entry_has_unique_id(self):
+        state = _make_state(decision_log=[])
+        patch1 = log_decision(state, {"type": "segment_selected", "segment_id": "seg-001", "label": "A"})
+        state2 = _make_state(decision_log=patch1["decision_log"])
+        patch2 = log_decision(state2, {"type": "segment_selected", "segment_id": "seg-002", "label": "B"})
+        ids = [e["id"] for e in patch2["decision_log"]]
+        assert ids[0] != ids[1]
+
+    def test_does_not_mutate_original_log(self):
+        original_log = [{"id": "x", "type": "summary", "created_at": "2026-01-01"}]
+        state = _make_state(decision_log=original_log)
+        log_decision(state, {"type": "segment_selected", "segment_id": "s", "label": "S"})
+        # Original list must not be mutated
+        assert len(original_log) == 1
 
     @pytest.mark.asyncio
     async def test_bundle_size_logged_for_all_agent_types(self, caplog):

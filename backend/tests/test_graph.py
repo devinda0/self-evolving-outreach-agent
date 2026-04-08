@@ -74,6 +74,7 @@ def _make_state(**overrides) -> dict:
         "winning_variant_id": None,
         "memory_refs": {},
         "error_messages": [],
+        "_last_summary_message_count": 0,
     }
     base.update(overrides)
     return base
