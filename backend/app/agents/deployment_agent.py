@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import uuid4
 
 import httpx
@@ -370,7 +371,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
             prospect=prospect,
             session_id=session_id,
         )
-        send_status = "failed" if error_detail else "sent"
+        send_status: Literal["sent", "failed"] = "failed" if error_detail else "sent"
         provider = "resend" if not settings.USE_MOCK_SEND and channel == "email" else "mock"
 
         # Create deployment record
