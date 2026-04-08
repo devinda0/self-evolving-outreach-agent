@@ -14,6 +14,7 @@ from langgraph.types import Send
 from app.agents.checkpointer import MongoDBSaver
 from app.agents.content_agent import content_agent_node
 from app.agents.deployment_agent import deployment_agent_node
+from app.agents.feedback_agent import feedback_agent_node
 from app.agents.orchestrator import clarify_node, orchestrator_node
 from app.agents.research import (
     research_dispatcher_node,
@@ -85,16 +86,9 @@ def research_fan_out(state: CampaignState) -> list[Send]:
 # ---------------------------------------------------------------------------
 
 
-async def feedback_agent_node(state: CampaignState) -> dict:
-    """STUB: process engagement feedback."""
-    logger.info("feedback_agent_node called | session=%s", state.get("session_id"))
-    return {
-        "engagement_results": [{"variant_id": "var-stub-1", "open_rate": 0.0}],
-    }
-
-
 # Note: orchestrator_node and clarify_node are imported from app.agents.orchestrator
 # Note: deployment_agent_node is imported from app.agents.deployment_agent
+# Note: feedback_agent_node is imported from app.agents.feedback_agent
 
 
 # ---------------------------------------------------------------------------
