@@ -18,13 +18,14 @@ from httpx import ASGITransport, AsyncClient
 
 from app.agents.content_agent import (
     content_agent_node,
-    generate_variants,
     get_segment_by_id,
 )
 from app.core.config import settings
 from app.db.client import close_db, connect_db, get_db
 from app.db.crud import (
     create_indexes,
+    get_prospect_cards,
+    get_segments,
     get_variants_for_session,
     load_campaign_state,
     save_campaign_state,
@@ -566,8 +567,6 @@ async def test_e2e_research_segment_content_pipeline():
 
     # 8. Verify ALL data persisted to MongoDB
     # Segments
-    from app.db.crud import get_segments, get_prospect_cards
-
     db_segments = await get_segments(session_id)
     assert len(db_segments) >= 2
 

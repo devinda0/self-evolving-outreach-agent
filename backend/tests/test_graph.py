@@ -217,7 +217,14 @@ async def test_segment_agent_node_returns_candidates():
 
 
 async def test_content_agent_node_returns_variants():
-    result = await content_agent_node(_make_state())
+    from unittest.mock import AsyncMock, patch
+
+    state = _make_state(briefing_summary="Test briefing: competitor gap identified in enterprise segment.")
+    with (
+        patch("app.agents.content_agent._get_llm", return_value=None),
+        patch("app.agents.content_agent.save_content_variant", new_callable=AsyncMock),
+    ):
+        result = await content_agent_node(state)
     assert len(result["content_variants"]) >= 2
 
 
@@ -315,7 +322,17 @@ async def test_graph_research_route():
 
 async def test_graph_generate_route_via_content_node():
     """Verify the content agent returns variants when invoked directly."""
-    result = await content_agent_node(_make_state(next_node="generate"))
+    from unittest.mock import AsyncMock, patch
+
+    state = _make_state(
+        next_node="generate",
+        briefing_summary="Test briefing: ROI opportunity identified for mid-market segment.",
+    )
+    with (
+        patch("app.agents.content_agent._get_llm", return_value=None),
+        patch("app.agents.content_agent.save_content_variant", new_callable=AsyncMock),
+    ):
+        result = await content_agent_node(state)
     assert len(result["content_variants"]) >= 2
     for v in result["content_variants"]:
         assert "id" in v
