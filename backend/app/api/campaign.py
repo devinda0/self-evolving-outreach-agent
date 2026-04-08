@@ -2,17 +2,54 @@
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
+from app.agents.graph import get_graph
 from app.db.crud import load_campaign_state, save_campaign_state
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["campaign"])
+
+# Cached compiled graph — initialized lazily after the DB connects at startup.
+_graph: CompiledStateGraph | None = None
+
+# Progress-emitting node names (used to filter astream_events)
+_PROGRESS_NODES = frozenset({
+    "orchestrator",
+    "research_dispatcher",
+    "research_thread",
+    "research_synthesizer",
+    "segment_agent",
+    "content_agent",
+    "deployment_agent",
+    "feedback_agent",
+    "clarify",
+})
+
+
+def _get_or_init_graph() -> CompiledStateGraph:
+    """Return the cached compiled graph, building it on first call."""
+    global _graph
+    if _graph is None:
+        _graph = get_graph()
+    return _graph
+
+
+def reset_graph() -> None:
+    """Discard the cached graph so the next call rebuilds it with the current DB.
+
+    Used in tests to ensure the checkpointer uses the active Motor client after
+    a DB teardown/setup cycle.
+    """
+    global _graph
+    _graph = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,44 +129,132 @@ def _new_campaign_state(session_id: str, req: StartCampaignRequest) -> dict[str,
         # Meta
         "memory_refs": {},
         "error_messages": [],
+        "pending_ui_frames": [],
     }
 
 
-async def _process_ws_message(
+def _state_delta_for_action(action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Map a UI action_id to a CampaignState partial update."""
+    if action_id == "select_segment":
+        return {"selected_segment_id": payload.get("segment_id")}
+    if action_id == "confirm_prospects":
+        return {"selected_prospect_ids": payload.get("selected_ids", [])}
+    if action_id == "navigate":
+        # User clicked a BriefingCard action button — store their next intent choice
+        return {"next_node": payload.get("target_intent")}
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Core graph invocation helpers
+# ---------------------------------------------------------------------------
+
+async def _run_graph_for_message(
+    websocket: WebSocket,
     session_id: str,
-    state: dict[str, Any],
-    data: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Process an incoming WS message and return response frames.
+    content: str,
+    db_state: dict[str, Any],
+) -> None:
+    """Invoke the LangGraph graph for one user message turn.
 
-    This is a stub that echoes back and returns a progress frame.
-    Once LangGraph is wired (issue #27), this will invoke the graph.
+    Streams progress events live, then drains pending_ui_frames from the
+    final checkpoint state once the graph reaches END.
     """
-    msg_type = data.get("type", "user_message")
-    frames: list[dict[str, Any]] = []
+    try:
+        from langgraph.errors import GraphRecursionError
+    except ImportError:
+        GraphRecursionError = Exception  # type: ignore[misc,assignment]  # noqa: N806
 
-    if msg_type == "user_message":
-        content = data.get("content", "")
-        # Append to messages in state
-        state.setdefault("messages", []).append(
-            {
-                "role": "user",
-                "content": content,
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            }
-        )
-        frames.append({"type": "progress", "stage": "orchestrator", "message": "Processing..."})
-        # Stub echo reply — will be replaced by LangGraph astream_events
-        frames.append({"type": "token", "content": f"Echo: {content}"})
+    graph = _get_or_init_graph()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": session_id},
+        "recursion_limit": 25,
+    }
 
-    elif msg_type == "ui_action":
-        frames.append({
-            "type": "progress",
-            "stage": "ui_action",
-            "message": f"Received action: {data.get('action_id', 'unknown')}",
+    # Every new turn: inject product context + new user message, reset
+    # session_complete so the graph doesn't exit immediately.
+    input_update: dict[str, Any] = {
+        "session_id": session_id,
+        "product_name": db_state.get("product_name", ""),
+        "product_description": db_state.get("product_description", ""),
+        "target_market": db_state.get("target_market", ""),
+        "messages": [HumanMessage(content=content)],
+        "session_complete": False,
+        "pending_ui_frames": [],
+    }
+
+    try:
+        async for event in graph.astream_events(input_update, config, version="v2"):
+            event_type = event.get("event", "")
+
+            # Emit a progress frame whenever a key node starts
+            if event_type == "on_chain_start":
+                node_name = event.get("name", "")
+                if node_name in _PROGRESS_NODES:
+                    await websocket.send_json({
+                        "type": "progress",
+                        "stage": node_name,
+                        "message": f"Running {node_name}…",
+                    })
+
+            # Forward streaming LLM tokens — skip internal nodes (orchestrator, clarify)
+            elif event_type == "on_chat_model_stream":
+                meta = event.get("metadata", {})
+                node = (
+                    meta.get("langgraph_node", "")
+                    or event.get("tags", [""])[0] if event.get("tags") else ""
+                )
+                if node in ("orchestrator", "clarify"):
+                    continue  # routing/classification JSON, not user-facing
+                chunk = event.get("data", {}).get("chunk")
+                if chunk and hasattr(chunk, "content") and chunk.content:
+                    await websocket.send_json({"type": "token", "content": chunk.content})
+
+    except GraphRecursionError:
+        logger.error("Graph recursion limit reached | session=%s", session_id)
+        await websocket.send_json({
+            "type": "error",
+            "message": "Processing limit reached — try a more specific request.",
         })
+        return
+    except Exception:
+        logger.exception("Graph execution error | session=%s", session_id)
+        await websocket.send_json({"type": "error", "message": "Agent error — please try again."})
+        return
 
-    return frames
+    # Drain UI frames queued by specialist nodes (BriefingCard, SegmentSelector, etc.)
+    try:
+        state_snap = await graph.aget_state(config)  # type: ignore[arg-type]
+        if state_snap and state_snap.values:
+            for frame in state_snap.values.get("pending_ui_frames", []):
+                await websocket.send_json(frame)
+    except Exception:
+        logger.exception("Failed to retrieve pending UI frames | session=%s", session_id)
+
+    await websocket.send_json({"type": "token_end"})
+
+
+async def _apply_ui_action(
+    session_id: str,
+    action_id: str,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Apply a UI action to the graph state. Returns response frames."""
+    delta = _state_delta_for_action(action_id, payload)
+    if delta:
+        graph = _get_or_init_graph()
+        config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+        try:
+            await graph.aupdate_state(config, delta)  # type: ignore[arg-type]
+            logger.info("Applied UI action '%s' to graph state | session=%s", action_id, session_id)
+        except Exception:
+            logger.warning("Could not update graph state for action '%s'", action_id, exc_info=True)
+
+    return [{
+        "type": "progress",
+        "stage": "ui_action",
+        "message": f"Action applied: {action_id}",
+    }]
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +276,6 @@ async def get_campaign_state(session_id: str) -> dict[str, Any]:
     state = await load_campaign_state(session_id)
     if state is None:
         from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Session not found")
     return state
 
@@ -162,17 +286,9 @@ async def post_ui_action(session_id: str, action: UIActionRequest) -> dict[str, 
     state = await load_campaign_state(session_id)
     if state is None:
         from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Session not found")
 
-    data = {
-        "type": "ui_action",
-        "instance_id": action.instance_id,
-        "action_id": action.action_id,
-        "payload": action.payload,
-    }
-    frames = await _process_ws_message(session_id, state, data)
-    await save_campaign_state(session_id, state)
+    frames = await _apply_ui_action(session_id, action.action_id, action.payload)
     return {"frames": frames}
 
 
@@ -185,35 +301,43 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
     """Main WebSocket endpoint for real-time campaign communication."""
     await websocket.accept()
 
-    # Load or create session state
-    state = await load_campaign_state(session_id)
-    if state is None:
-        state = _new_campaign_state(
+    # Load campaign session (product context) — create a bare record if missing.
+    db_state = await load_campaign_state(session_id)
+    if db_state is None:
+        db_state = _new_campaign_state(
             session_id,
-            StartCampaignRequest(
-                product_name="",
-                product_description="",
-                target_market="",
-            ),
+            StartCampaignRequest(product_name="", product_description="", target_market=""),
         )
-        await save_campaign_state(session_id, state)
+        await save_campaign_state(session_id, db_state)
 
     try:
         while True:
             data = await websocket.receive_json()
-            frames = await _process_ws_message(session_id, state, data)
+            msg_type = data.get("type", "user_message")
 
-            # Persist updated state
-            await save_campaign_state(session_id, state)
+            if msg_type == "user_message":
+                content = str(data.get("content", "")).strip()
+                if not content:
+                    continue
+                await _run_graph_for_message(websocket, session_id, content, db_state)
 
-            # Stream frames back to client
-            for frame in frames:
-                await websocket.send_json(frame)
+            elif msg_type == "ui_action":
+                action_id = str(data.get("action_id", ""))
+                payload = data.get("payload", {})
+
+                # Clarification responses should re-enter the graph as a user message
+                if payload.get("response"):
+                    content = str(payload["response"])
+                    await _run_graph_for_message(websocket, session_id, content, db_state)
+                else:
+                    frames = await _apply_ui_action(session_id, action_id, payload)
+                    for frame in frames:
+                        await websocket.send_json(frame)
 
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected for session %s", session_id)
+        logger.info("WebSocket disconnected | session=%s", session_id)
     except Exception:
-        logger.exception("WebSocket error for session %s", session_id)
+        logger.exception("WebSocket error | session=%s", session_id)
         try:
             await websocket.send_json({"type": "error", "message": "Internal server error"})
             await websocket.close()

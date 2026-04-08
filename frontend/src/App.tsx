@@ -203,6 +203,18 @@ function ChatThread() {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  function handleAction(instanceId: string, actionId: string, payload: Record<string, unknown>) {
+    // Clarification responses → send as a regular user message
+    const responseText = payload.response ?? payload.selected;
+    if (responseText) {
+      const text = String(responseText);
+      useCampaignStore.getState().addUserMessage(text);
+      sendMessage(text);
+      return;
+    }
+    sendUIAction(instanceId, actionId, payload);
+  }
+
   function handleSend(e: FormEvent) {
     e.preventDefault();
     const text = input.trim();
@@ -279,7 +291,7 @@ function ChatThread() {
       >
         <div className="mx-auto max-w-2xl">
           {messages.map((msg) => (
-            <MessageRenderer key={msg.id} message={msg} onAction={sendUIAction} />
+            <MessageRenderer key={msg.id} message={msg} onAction={handleAction} />
           ))}
           {isStreaming && (
             <div className="flex items-center gap-2 py-2" style={{ color: "var(--text-muted)", fontSize: "12px" }}>

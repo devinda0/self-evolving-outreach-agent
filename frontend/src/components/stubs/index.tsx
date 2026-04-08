@@ -5,14 +5,12 @@ import type { UIFrame } from "../../store/campaignStore";
 export { default as BriefingCard } from "../BriefingCard";
 export { default as ResearchProgress } from "../ResearchProgress";
 export { default as ClarificationPrompt } from "../ClarificationPrompt";
+export { default as SegmentSelector } from "../SegmentSelector";
+export { default as ProspectPicker } from "../ProspectPicker";
 
 interface Props {
   frame: UIFrame;
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
-}
-
-export function ProspectPicker(props: Props) {
-  return <StubComponent {...props} />;
 }
 
 export function VariantGrid(props: Props) {
