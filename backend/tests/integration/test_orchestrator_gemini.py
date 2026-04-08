@@ -11,12 +11,12 @@ import pytest
 from app.agents.orchestrator import orchestrator_node
 from app.core.config import settings
 
-# Skip all tests in this module if GEMINI_API_KEY is not set
+# Skip all tests in this module if GEMINI_API_KEY is not set or mock-LLM is active
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        not settings.GEMINI_API_KEY,
-        reason="GEMINI_API_KEY not set in environment",
+        not settings.GEMINI_API_KEY or settings.USE_MOCK_LLM,
+        reason="GEMINI_API_KEY not set or USE_MOCK_LLM is active",
     ),
 ]
 

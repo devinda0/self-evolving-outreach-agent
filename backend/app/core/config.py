@@ -6,14 +6,12 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     MONGODB_URI: str = "mongodb://localhost:27017"  # override via Railway Variables or .env
     DB_NAME: str = "signal_to_action"
-    TAVILY_API_KEY: str = ""  # required for research tools
-
     # LLM settings
     GEMINI_API_KEY: str = ""
     USE_MOCK_LLM: bool = False  # Set true to bypass Gemini in tests
 
     # Search settings
-    TAVILY_API_KEY: str = ""
+    TAVILY_API_KEY: str = ""  # required for research tools
 
     # Email deployment
     RESEND_API_KEY: str = ""
