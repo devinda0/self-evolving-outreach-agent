@@ -3,17 +3,21 @@
 Tests cover:
 - build_context_bundle returns correct fields per agent type
 - Excluded fields are NOT present for each agent type
+- Orchestrator bundle uses 12-message window (not 8)
 - maybe_summarize_conversation triggers at correct threshold
 - Summary preserves last 8 raw messages verbatim
 - enforce_token_budget truncates correctly
 - _get_compact_prospect_cards filters by selection correctly
+- build_context_bundle logs approximate token count
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.memory.manager import (
+    _ORCHESTRATOR_MESSAGE_WINDOW,
     AGENT_TOKEN_BUDGETS,
     MemoryManager,
     enforce_token_budget,
@@ -572,3 +576,108 @@ class TestGetSelectedSegment:
         state = _make_state(segment_candidates=[])
         seg = manager._get_selected_segment(state)
         assert seg is None
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator message window — must be 12 (not 8)
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorMessageWindow:
+    @pytest.mark.asyncio
+    async def test_orchestrator_bundle_uses_12_message_window(self):
+        """Orchestrator should receive up to 12 recent messages, not 8."""
+        manager = _make_manager()
+        messages = [{"role": "user" if i % 2 == 0 else "ai", "content": f"msg {i}"} for i in range(20)]
+        state = _make_state(messages=messages)
+        bundle = await manager.build_context_bundle(state, "orchestrator")
+
+        recent = bundle["recent_messages"]
+        # With 20 messages and a 12-window, we should get exactly 12
+        assert len(recent) == _ORCHESTRATOR_MESSAGE_WINDOW
+        assert recent[-1]["content"] == "msg 19"
+
+    @pytest.mark.asyncio
+    async def test_non_orchestrator_agent_uses_8_message_window(self):
+        """Non-orchestrator agents should use the default 8-message window."""
+        manager = _make_manager()
+        messages = [{"role": "user" if i % 2 == 0 else "ai", "content": f"msg {i}"} for i in range(20)]
+        state = _make_state(messages=messages)
+        bundle = await manager.build_context_bundle(state, "content")
+
+        recent = bundle["recent_messages"]
+        # content agent uses the default 8-message window
+        assert len(recent) == 8
+        assert recent[-1]["content"] == "msg 19"
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_window_constant_is_12(self):
+        """The orchestrator message window constant must be 12 per spec."""
+        assert _ORCHESTRATOR_MESSAGE_WINDOW == 12
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_bundle_does_not_contain_research_findings(self):
+        """Research findings must not leak into the orchestrator bundle — token safety."""
+        manager = _make_manager()
+        state = _make_state()
+        bundle = await manager.build_context_bundle(state, "orchestrator")
+
+        assert "research_findings" not in bundle
+        assert "source_findings" not in bundle
+        assert "top_findings" not in bundle
+        assert "top_long_term_findings" not in bundle
+
+
+# ---------------------------------------------------------------------------
+# Bundle size logging
+# ---------------------------------------------------------------------------
+
+
+class TestBundleSizeLogging:
+    @pytest.mark.asyncio
+    async def test_build_context_bundle_logs_approx_tokens(self, caplog):
+        """build_context_bundle must emit a DEBUG log with approx_tokens per agent call."""
+        manager = _make_manager()
+        state = _make_state()
+
+        with caplog.at_level(logging.DEBUG, logger="app.memory.manager"):
+            await manager.build_context_bundle(state, "orchestrator")
+
+        log_messages = [r.message for r in caplog.records]
+        token_logs = [m for m in log_messages if "approx_tokens" in m]
+        assert len(token_logs) == 1, f"Expected 1 token log, got: {token_logs}"
+        assert "orchestrator" in token_logs[0]
+
+    @pytest.mark.asyncio
+    async def test_bundle_size_logged_for_all_agent_types(self, caplog):
+        """Every agent type triggers an approx_tokens DEBUG log."""
+        manager = _make_manager()
+        state = _make_state()
+
+        agent_types = ["orchestrator", "research", "segment", "content", "deployment", "feedback"]
+        with caplog.at_level(logging.DEBUG, logger="app.memory.manager"):
+            with patch("app.memory.manager.get_top_findings", new_callable=AsyncMock, return_value=[]):
+                for agent_type in agent_types:
+                    await manager.build_context_bundle(state, agent_type)
+
+        log_messages = [r.message for r in caplog.records]
+        token_logs = [m for m in log_messages if "approx_tokens" in m]
+        assert len(token_logs) == len(agent_types), (
+            f"Expected {len(agent_types)} token logs, got {len(token_logs)}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_bundle_approx_tokens_within_budget(self, caplog):
+        """Logged approx_tokens should not exceed the agent's declared budget."""
+        manager = _make_manager()
+        state = _make_state()
+
+        with caplog.at_level(logging.DEBUG, logger="app.memory.manager"):
+            bundle = await manager.build_context_bundle(state, "deployment")
+
+        # Compute the same way as the logging code
+        approx_chars = sum(len(str(v)) for v in bundle.values())
+        approx_tokens = approx_chars // 4  # _CHARS_PER_TOKEN
+        budget = AGENT_TOKEN_BUDGETS["deployment"]
+        # After enforce_token_budget, should be within 2x budget (str() overhead)
+        assert approx_tokens <= budget * 2
