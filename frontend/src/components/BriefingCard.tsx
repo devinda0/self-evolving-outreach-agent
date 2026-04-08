@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UIFrame } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface Finding {
   claim: string;
@@ -78,6 +79,7 @@ export default function BriefingCard({ frame, onAction }: Props) {
   const briefing = (frame.props.briefing ?? frame.props) as BriefingProps;
   const findingCount = (frame.props.finding_count as number) ?? briefing.top_findings?.length ?? 0;
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const {
     executive_summary = "",
@@ -243,10 +245,19 @@ export default function BriefingCard({ frame, onAction }: Props) {
             <button
               key={action.id}
               type="button"
+              disabled={isPendingAction}
               className={i === 0 ? "btn-accent" : "btn-ghost"}
+              style={{ opacity: isPendingAction ? 0.6 : undefined }}
               onClick={() => onAction(frame.instance_id, action.id, action.payload)}
             >
-              {action.label}
+              {isPendingAction ? (
+                <>
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" style={{ marginRight: "6px" }} />
+                  Queuing…
+                </>
+              ) : (
+                action.label
+              )}
             </button>
           ))}
         </div>

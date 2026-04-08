@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface Segment {
   id: string;
@@ -17,6 +18,7 @@ interface Props {
 export default function SegmentSelector({ frame, onAction }: Props) {
   const segments = (frame.props.segments as Segment[]) ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const selectAction = frame.actions.find(
     (a: UIAction) => a.action_type === "select_segment" || a.id === "select_segment"
@@ -191,6 +193,7 @@ export default function SegmentSelector({ frame, onAction }: Props) {
               {isSelected && (
                 <button
                   type="button"
+                  disabled={isPendingAction}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleUseSegment();
@@ -200,21 +203,34 @@ export default function SegmentSelector({ frame, onAction }: Props) {
                     marginTop: "2px",
                     padding: "8px 14px",
                     borderRadius: "var(--radius-sm)",
-                    background: "var(--accent)",
+                    background: isPendingAction ? "var(--bg-elevated)" : "var(--accent)",
                     border: "none",
-                    color: "#06070a",
+                    color: isPendingAction ? "var(--text-muted)" : "#06070a",
                     fontSize: "11.5px",
                     fontWeight: 700,
                     fontFamily: "var(--font-body)",
                     letterSpacing: "0.02em",
-                    cursor: "pointer",
-                    boxShadow: "0 0 16px var(--accent-glow-strong)",
-                    transition: "opacity 0.15s",
+                    cursor: isPendingAction ? "default" : "pointer",
+                    boxShadow: isPendingAction ? "none" : "0 0 16px var(--accent-glow-strong)",
+                    transition: "all 0.15s",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+                  onMouseEnter={(e) => {
+                    if (!isPendingAction) e.currentTarget.style.opacity = "0.88";
+                  }}
                   onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                 >
-                  Use This Segment →
+                  {isPendingAction ? (
+                    <>
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      Queuing…
+                    </>
+                  ) : (
+                    "Use This Segment →"
+                  )}
                 </button>
               )}
             </button>

@@ -386,7 +386,14 @@ async def segment_agent_node(state: CampaignState) -> dict:
     This replaces the stub in graph.py.
     """
     session_id = state.get("session_id", "")
-    logger.info("segment_agent_node called | session=%s", session_id)
+    briefing_present = bool(state.get("briefing_summary"))
+    findings_count = len(state.get("research_findings", []))
+    logger.info(
+        "segment_agent_node called | session=%s briefing=%s findings=%d",
+        session_id,
+        briefing_present,
+        findings_count,
+    )
 
     # Step 1: Derive segment candidates from briefing
     segments = await derive_segments(

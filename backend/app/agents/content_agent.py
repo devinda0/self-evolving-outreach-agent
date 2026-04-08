@@ -297,7 +297,7 @@ def build_variant_grid_frame(variants: list[ContentVariant], instance_id: str) -
         component="VariantGrid",
         instance_id=instance_id,
         props={
-            "variants": [v.model_dump() for v in variants],
+            "variants": [v.model_dump(mode="json") for v in variants],
         },
         actions=[
             UIAction(
@@ -335,13 +335,27 @@ async def content_agent_node(state: CampaignState) -> dict:
     - VariantGrid UI frame emitted for the WebSocket handler to drain
     """
     session_id = state.get("session_id", "")
-    logger.info("content_agent_node called | session=%s", session_id)
+    briefing = state.get("briefing_summary")
+    findings_count = len(state.get("research_findings", []))
+    segment_id = state.get("selected_segment_id")
+    segment_candidates_count = len(state.get("segment_candidates", []))
+    logger.info(
+        "content_agent_node called | session=%s briefing=%s briefing_len=%d "
+        "findings=%d segment_id=%s candidates=%d",
+        session_id,
+        bool(briefing),
+        len(briefing) if briefing else 0,
+        findings_count,
+        segment_id,
+        segment_candidates_count,
+    )
 
     # -- Prerequisite: briefing_summary --
     if not state.get("briefing_summary"):
         logger.warning("content_agent_node: no briefing_summary | session=%s", session_id)
         return {
             "next_node": "orchestrator",
+            "session_complete": True,
             "error_messages": [
                 "No research briefing found. Please run research first before generating content."
             ],
@@ -387,7 +401,8 @@ async def content_agent_node(state: CampaignState) -> dict:
     )
 
     return {
-        "content_variants": [v.model_dump() for v in variants],
+        "content_variants": [v.model_dump(mode="json") for v in variants],
         "next_node": "orchestrator",
+        "session_complete": True,
         "pending_ui_frames": [grid_frame],
     }

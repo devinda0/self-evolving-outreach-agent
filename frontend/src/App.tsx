@@ -212,6 +212,7 @@ function ChatThread() {
       sendMessage(text);
       return;
     }
+    useCampaignStore.getState().setPendingAction(true);
     sendUIAction(instanceId, actionId, payload);
   }
 

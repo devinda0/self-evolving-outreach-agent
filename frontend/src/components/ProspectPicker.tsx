@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface Prospect {
   id: string;
@@ -109,6 +110,7 @@ export default function ProspectPicker({ frame, onAction }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSelected));
   const [titleFilter, setTitleFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("fit_score");
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const deployAction = frame.actions.find(
     (a: UIAction) => a.action_type === "confirm_prospects" || a.id === "confirm_prospects"
@@ -426,30 +428,40 @@ export default function ProspectPicker({ frame, onAction }: Props) {
         </div>
         <button
           type="button"
-          disabled={selectedCount === 0}
+          disabled={selectedCount === 0 || isPendingAction}
           onClick={handleDeploy}
           style={{
             padding: "8px 18px",
             borderRadius: "var(--radius-sm)",
-            background: selectedCount > 0 ? "var(--accent)" : "var(--bg-elevated)",
+            background: selectedCount > 0 && !isPendingAction ? "var(--accent)" : "var(--bg-elevated)",
             border: "none",
-            color: selectedCount > 0 ? "#06070a" : "var(--text-muted)",
+            color: selectedCount > 0 && !isPendingAction ? "#06070a" : "var(--text-muted)",
             fontSize: "11.5px",
             fontWeight: 700,
             fontFamily: "var(--font-body)",
             letterSpacing: "0.02em",
-            cursor: selectedCount > 0 ? "pointer" : "default",
-            boxShadow: selectedCount > 0 ? "0 0 16px var(--accent-glow-strong)" : "none",
+            cursor: selectedCount > 0 && !isPendingAction ? "pointer" : "default",
+            boxShadow: selectedCount > 0 && !isPendingAction ? "0 0 16px var(--accent-glow-strong)" : "none",
             transition: "all 0.2s",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
           onMouseEnter={(e) => {
-            if (selectedCount > 0) e.currentTarget.style.opacity = "0.88";
+            if (selectedCount > 0 && !isPendingAction) e.currentTarget.style.opacity = "0.88";
           }}
           onMouseLeave={(e) => {
-            if (selectedCount > 0) e.currentTarget.style.opacity = "1";
+            if (selectedCount > 0 && !isPendingAction) e.currentTarget.style.opacity = "1";
           }}
         >
-          Deploy to Selected →
+          {isPendingAction ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Queuing…
+            </>
+          ) : (
+            "Deploy to Selected →"
+          )}
         </button>
       </div>
     </div>

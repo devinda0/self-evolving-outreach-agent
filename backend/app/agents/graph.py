@@ -34,7 +34,14 @@ logger = logging.getLogger(__name__)
 
 def route_from_orchestrator(state: CampaignState) -> str:
     """Read next_node from state and return the routing key."""
+    session_id = state.get("session_id", "unknown")
+
     if state.get("session_complete"):
+        logger.info(
+            "route_from_orchestrator → END (session_complete=True) | session=%s next_node=%s",
+            session_id,
+            state.get("next_node"),
+        )
         return END
 
     next_node = state.get("next_node")
@@ -46,7 +53,19 @@ def route_from_orchestrator(state: CampaignState) -> str:
         "feedback",
         "clarify",
     ):
+        logger.info(
+            "route_from_orchestrator → %s | session=%s intent=%s",
+            next_node,
+            session_id,
+            state.get("current_intent"),
+        )
         return next_node
+
+    logger.warning(
+        "route_from_orchestrator: unrecognised next_node '%s', falling back to clarify | session=%s",
+        next_node,
+        session_id,
+    )
     return "clarify"
 
 
@@ -127,16 +146,16 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     # -- Research fan-out (dispatcher → parallel threads) --
     builder.add_conditional_edges("research_dispatcher", research_fan_out)
 
-    # -- Research fan-in → synthesizer → back to orchestrator --
+    # -- Research fan-in → synthesizer → END (fresh run triggered by next user message) --
     builder.add_edge("research_thread", "research_synthesizer")
-    builder.add_edge("research_synthesizer", "orchestrator")
+    builder.add_edge("research_synthesizer", END)
 
-    # -- All specialist agents return to orchestrator --
-    builder.add_edge("segment_agent", "orchestrator")
-    builder.add_edge("content_agent", "orchestrator")
-    builder.add_edge("deployment_agent", "orchestrator")
-    builder.add_edge("feedback_agent", "orchestrator")
-    builder.add_edge("clarify", "orchestrator")
+    # -- All specialist agents route to END; each user turn starts a fresh run from orchestrator --
+    builder.add_edge("segment_agent", END)
+    builder.add_edge("content_agent", END)
+    builder.add_edge("deployment_agent", END)
+    builder.add_edge("feedback_agent", END)
+    builder.add_edge("clarify", END)
 
     return builder.compile(checkpointer=checkpointer)
 

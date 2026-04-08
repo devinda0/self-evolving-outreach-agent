@@ -1,4 +1,5 @@
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface ChannelBreakdown {
   channel: string;
@@ -82,6 +83,7 @@ export default function DeploymentConfirm({ frame, onAction }: Props) {
   const channelBreakdown =
     (frame.props.channel_breakdown as ChannelBreakdown[]) ?? [];
   const abPlan = frame.props.ab_plan as ABPlan | undefined;
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const confirmAction = frame.actions.find(
     (a: UIAction) =>
@@ -390,11 +392,13 @@ export default function DeploymentConfirm({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-ghost"
+          disabled={isPendingAction}
           onClick={handleCancel}
           style={{
             fontSize: "12px",
             padding: "8px 18px",
             borderRadius: "var(--radius-sm)",
+            opacity: isPendingAction ? 0.5 : undefined,
           }}
         >
           Cancel
@@ -402,6 +406,7 @@ export default function DeploymentConfirm({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-accent"
+          disabled={isPendingAction}
           onClick={handleConfirm}
           style={{
             fontSize: "12px",
@@ -410,10 +415,20 @@ export default function DeploymentConfirm({ frame, onAction }: Props) {
             display: "flex",
             alignItems: "center",
             gap: "6px",
+            opacity: isPendingAction ? 0.6 : undefined,
           }}
         >
-          <RocketIcon />
-          Confirm &amp; Deploy
+          {isPendingAction ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Queuing…
+            </>
+          ) : (
+            <>
+              <RocketIcon />
+              Confirm &amp; Deploy
+            </>
+          )}
         </button>
       </div>
     </div>

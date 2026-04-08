@@ -20,18 +20,23 @@ export function useWebSocket(sessionId: string | null) {
         case "token":
           store.appendToken(frame.content as string);
           store.setStreaming(true);
+          store.setPendingAction(false);
           break;
         case "token_end":
           store.setStreaming(false);
+          store.setPendingAction(false);
           break;
         case "ui_component":
           store.addUIFrame(frame as unknown as Parameters<typeof store.addUIFrame>[0]);
+          store.setPendingAction(false);
           break;
         case "progress":
           store.setCurrentStage((frame.stage as string) ?? null);
+          store.setPendingAction(false);
           break;
         case "error":
           store.addErrorMessage((frame.message as string) ?? "Unknown error");
+          store.setPendingAction(false);
           break;
         default:
           break;
