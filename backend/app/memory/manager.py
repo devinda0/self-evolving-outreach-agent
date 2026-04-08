@@ -8,6 +8,7 @@ Also manages conversation summarisation when the thread grows long.
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -41,8 +42,21 @@ _RECENT_MESSAGE_WINDOW = 8
 # Orchestrator needs a slightly larger window to capture full conversation intent
 _ORCHESTRATOR_MESSAGE_WINDOW = 12
 
-# Trigger conversation summarisation after this many messages
-_SUMMARISE_THRESHOLD = 20
+# ---------------------------------------------------------------------------
+# Summarisation constants (public — imported by tests and graph nodes)
+# ---------------------------------------------------------------------------
+
+# Minimum messages before the first summary is generated
+SUMMARIZATION_THRESHOLD = 20
+
+# Re-summarise only after this many additional messages accumulate since last summary
+RESUMMARIZE_EVERY_N = 10
+
+# Always keep this many recent messages verbatim (never summarised)
+VERBATIM_KEEP_LAST_N = 8
+
+# Internal alias used by MemoryManager.maybe_summarize_conversation
+_SUMMARISE_THRESHOLD = SUMMARIZATION_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -175,18 +189,25 @@ class MemoryManager:
         return bundle
 
     async def maybe_summarize_conversation(self, state: CampaignState) -> dict:
-        """If the conversation exceeds 20 messages, generate a rolling summary.
+        """If the conversation exceeds SUMMARIZATION_THRESHOLD messages, generate a rolling summary.
 
-        Preserves the raw transcript in state. Keeps verbatim: last 8 turns,
-        unresolved clarifications, explicit approvals, final selections.
+        Tracks ``_last_summary_message_count`` so re-summarisation only occurs
+        after RESUMMARIZE_EVERY_N additional messages have accumulated.
+
+        Preserves the raw transcript in state. Keeps verbatim: last VERBATIM_KEEP_LAST_N
+        turns, unresolved clarifications, explicit approvals, final selections.
 
         Returns a (possibly empty) state patch dict.
         """
         messages = state.get("messages", [])
-        if len(messages) <= _SUMMARISE_THRESHOLD:
+        if len(messages) <= SUMMARIZATION_THRESHOLD:
             return {}
 
-        older_messages = messages[:-_RECENT_MESSAGE_WINDOW]
+        last_summary_coverage = state.get("_last_summary_message_count", 0)
+        if len(messages) - last_summary_coverage < RESUMMARIZE_EVERY_N:
+            return {}
+
+        older_messages = messages[last_summary_coverage:-VERBATIM_KEEP_LAST_N]
         summary_prompt = (
             "Summarize this campaign conversation. Preserve:\n"
             "- Key decisions made (segment chosen, variants selected, channels confirmed)\n"
@@ -215,12 +236,14 @@ class MemoryManager:
                 )
                 return {}
 
+        new_coverage = len(messages) - VERBATIM_KEEP_LAST_N
         decision_log = list(state.get("decision_log", []))
         decision_log.append(
             {
+                "id": str(uuid4()),
                 "type": "conversation_summary",
                 "summary": summary_text,
-                "covers_messages": len(messages) - _RECENT_MESSAGE_WINDOW,
+                "covers_messages": new_coverage,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -234,6 +257,7 @@ class MemoryManager:
         return {
             "conversation_summary": summary_text,
             "decision_log": decision_log,
+            "_last_summary_message_count": new_coverage,
         }
 
     # ------------------------------------------------------------------
@@ -407,3 +431,73 @@ class MemoryManager:
 # ---------------------------------------------------------------------------
 
 memory_manager = MemoryManager()
+
+
+# ---------------------------------------------------------------------------
+# Standalone graph node — pass-through between orchestrator and specialists
+# ---------------------------------------------------------------------------
+
+
+async def maybe_summarize_node(state: CampaignState) -> dict:
+    """LangGraph pass-through node that conditionally summarises the conversation.
+
+    Inserted between the orchestrator node and all specialist agents so that
+    every agent call starts with a compact, within-budget context.
+
+    Trigger rules:
+    - No-op when ``messages`` length ≤ SUMMARIZATION_THRESHOLD (20).
+    - No-op when fewer than RESUMMARIZE_EVERY_N (10) messages have accumulated
+      since the last summary.
+    - Otherwise, summarises messages[last_coverage:-VERBATIM_KEEP_LAST_N] and
+      writes the result back to state.
+    """
+    messages = state.get("messages", [])
+
+    if len(messages) <= SUMMARIZATION_THRESHOLD:
+        return {}
+
+    last_summary_coverage = state.get("_last_summary_message_count", 0)
+    if len(messages) - last_summary_coverage < RESUMMARIZE_EVERY_N:
+        return {}
+
+    return await memory_manager.maybe_summarize_conversation(state)
+
+
+# ---------------------------------------------------------------------------
+# Decision log helpers
+# ---------------------------------------------------------------------------
+
+
+def log_decision(state: CampaignState, entry: dict) -> dict:
+    """Return a state patch that appends a typed entry to the decision log.
+
+    Callers pass the event-specific fields (``type``, plus any domain keys).
+    This function stamps a unique ``id`` and ``created_at`` automatically.
+
+    Supported entry types and their required extra keys:
+    - ``segment_selected``: ``segment_id``, ``label``
+    - ``variants_selected``: ``variant_ids``
+    - ``deployment_confirmed``: ``prospect_count``
+    - ``cycle_complete``: ``cycle``, ``winner_id``
+
+    Example::
+
+        patch = log_decision(state, {
+            "type": "segment_selected",
+            "segment_id": "seg-001",
+            "label": "VP Sales at Series B SaaS",
+        })
+        # merge patch back into state update dict
+
+    Returns:
+        Dict with a single key ``decision_log`` containing the full updated list.
+    """
+    existing = list(state.get("decision_log", []))
+    existing.append(
+        {
+            "id": str(uuid4()),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            **entry,
+        }
+    )
+    return {"decision_log": existing}

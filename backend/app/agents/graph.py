@@ -23,6 +23,7 @@ from app.agents.research import (
 )
 from app.agents.segment_agent import segment_agent_node
 from app.db.client import get_db
+from app.memory.manager import maybe_summarize_node
 from app.models.campaign_state import CampaignState
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
 
     # -- Add nodes --
     builder.add_node("orchestrator", orchestrator_node)
+    builder.add_node("maybe_summarize", maybe_summarize_node)
     builder.add_node("research_dispatcher", research_dispatcher_node)
     builder.add_node("research_thread", research_thread_node)
     builder.add_node("research_synthesizer", research_synthesizer_node)
@@ -119,9 +121,12 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     # -- Entry point --
     builder.set_entry_point("orchestrator")
 
-    # -- Conditional routing from orchestrator --
+    # -- Summarisation pass-through: orchestrator → maybe_summarize → specialists --
+    builder.add_edge("orchestrator", "maybe_summarize")
+
+    # -- Conditional routing from maybe_summarize (preserves next_node set by orchestrator) --
     builder.add_conditional_edges(
-        "orchestrator",
+        "maybe_summarize",
         route_from_orchestrator,
         {
             "research": "research_dispatcher",
