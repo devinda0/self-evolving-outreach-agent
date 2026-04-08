@@ -230,7 +230,7 @@ async def generate_variants(
 
     try:
         response = await llm.ainvoke(prompt)
-        raw = response.content if hasattr(response, "content") else str(response)
+        raw = str(response.content) if hasattr(response, "content") else str(response)
         parsed: list[dict] = _parse_json_response(raw)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("generate_variants: LLM parse failed (%s) — falling back to mock", exc)
@@ -360,7 +360,7 @@ async def content_agent_node(state: CampaignState) -> dict:
     variants = await generate_variants(
         product_name=state.get("product_name", "Unknown Product"),
         product_description=state.get("product_description", ""),
-        briefing_summary=state.get("briefing_summary", ""),
+        briefing_summary=state.get("briefing_summary") or "",
         top_findings=top_findings,
         selected_segment=selected_segment,
         selected_channels=state.get("selected_channels", ["email"]),
