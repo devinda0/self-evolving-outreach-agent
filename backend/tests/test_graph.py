@@ -14,14 +14,16 @@ from app.agents.graph import (
     content_agent_node,
     deployment_agent_node,
     feedback_agent_node,
-    research_dispatcher_node,
     research_fan_out,
-    research_synthesizer_node,
-    research_thread_node,
     route_from_orchestrator,
-    segment_agent_node,
 )
 from app.agents.orchestrator import clarify_node, orchestrator_node
+from app.agents.research import (
+    research_dispatcher_node,
+    research_synthesizer_node,
+    research_thread_node,
+)
+from app.agents.segment_agent import segment_agent_node
 
 # ---------------------------------------------------------------------------
 # Minimal state helper
@@ -164,17 +166,43 @@ async def test_research_dispatcher_node_returns_threads():
 
 
 async def test_research_thread_node_returns_findings():
-    state = _make_state(thread_type="competitor")
-    result = await research_thread_node(state)
-    assert len(result["research_findings"]) == 1
-    assert "competitor" in result["research_findings"][0]["claim"]
+    from unittest.mock import AsyncMock, patch
+
+    mock_results = [
+        {"title": "Competitor X launches product", "url": "https://example.com/1", "content": "Details", "score": 0.7},
+        {"title": "Competitor Y pricing update", "url": "https://example.com/2", "content": "Info", "score": 0.6},
+    ]
+
+    with (
+        patch("app.agents.research.thread._get_llm", return_value=None),
+        patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
+        patch("app.agents.research.thread.extract_page", new_callable=AsyncMock, return_value="Page text"),
+    ):
+        state = _make_state(thread_type="competitor")
+        result = await research_thread_node(state)
+    assert len(result["research_findings"]) >= 2
+    assert all(f["thread_type"] == "competitor" for f in result["research_findings"])
 
 
 async def test_research_synthesizer_node_returns_briefing():
-    state = _make_state(research_findings=[{"claim": "a"}, {"claim": "b"}])
-    result = await research_synthesizer_node(state)
+    from unittest.mock import AsyncMock, patch
+
+    findings = [
+        {"claim": "Claim A", "confidence": 0.8, "thread_type": "competitor", "evidence": "ev", "source_url": "http://a.com", "actionable_implication": "act"},
+        {"claim": "Claim B", "confidence": 0.7, "thread_type": "audience", "evidence": "ev", "source_url": "http://b.com", "actionable_implication": "act"},
+    ]
+    state = _make_state(research_findings=findings)
+
+    with (
+        patch("app.agents.research.synthesizer._get_llm", return_value=None),
+        patch("app.agents.research.synthesizer.save_research_finding", new_callable=AsyncMock),
+    ):
+        result = await research_synthesizer_node(state)
     assert "briefing_summary" in result
-    assert "2" in result["briefing_summary"]
+    assert len(result["briefing_summary"]) > 0
+    assert "research_gaps" in result
+    assert "_pending_ui_frames" in result
+    assert result["_pending_ui_frames"][0]["component"] == "BriefingCard"
 
 
 async def test_segment_agent_node_returns_candidates():
@@ -238,13 +266,11 @@ async def test_graph_invoke_returns_updated_state():
 
 async def test_graph_research_route():
     """Verify research routing fans out to 4 threads and synthesizes."""
+    from unittest.mock import AsyncMock, patch
+
     # Build graph without checkpointer
     build_graph(checkpointer=None)
 
-    # Override orchestrator to route to research on first call, then END
-    # We do this by pre-setting next_node in state
-    # However, since we're using stubs, orchestrator always returns clarify.
-    # Instead, test the sub-components directly.
     state = _make_state(
         next_node="research",
         active_thread_types=["competitor", "audience", "channel", "market"],
@@ -258,18 +284,33 @@ async def test_graph_research_route():
     sends = research_fan_out({**state, **dispatcher_result})
     assert len(sends) == 4
 
-    # Verify each thread produces findings
+    # Verify each thread produces findings (with mocked external calls)
+    mock_results = [
+        {"title": "Result", "url": "https://example.com/1", "content": "Details", "score": 0.7},
+        {"title": "Result 2", "url": "https://example.com/2", "content": "More", "score": 0.6},
+    ]
+
     all_findings = []
     for send in sends:
-        thread_result = await research_thread_node(send.arg)
-        all_findings.extend(thread_result["research_findings"])
-    assert len(all_findings) == 4
+        with (
+            patch("app.agents.research.thread._get_llm", return_value=None),
+            patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
+            patch("app.agents.research.thread.extract_page", new_callable=AsyncMock, return_value="text"),
+        ):
+            thread_result = await research_thread_node(send.arg)
+            all_findings.extend(thread_result["research_findings"])
+    assert len(all_findings) >= 8  # At least 2 findings per thread × 4 threads
 
     # Verify synthesizer
-    synth_result = await research_synthesizer_node(
-        _make_state(research_findings=all_findings)
-    )
-    assert "4" in synth_result["briefing_summary"]
+    with (
+        patch("app.agents.research.synthesizer._get_llm", return_value=None),
+        patch("app.agents.research.synthesizer.save_research_finding", new_callable=AsyncMock),
+    ):
+        synth_result = await research_synthesizer_node(
+            _make_state(research_findings=all_findings)
+        )
+    assert len(synth_result["briefing_summary"]) > 0
+    assert "_pending_ui_frames" in synth_result
 
 
 async def test_graph_generate_route_via_content_node():

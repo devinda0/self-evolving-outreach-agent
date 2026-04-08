@@ -47,9 +47,13 @@ async def load_campaign_state(session_id: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 async def save_research_finding(finding: dict[str, Any]) -> None:
-    """Insert a single research finding."""
+    """Insert a single research finding.
+
+    Uses a shallow copy to prevent ``insert_one`` from mutating the caller's
+    dict with a BSON ``_id`` field.
+    """
     db = get_db()
-    await db[RESEARCH_FINDINGS].insert_one(finding)
+    await db[RESEARCH_FINDINGS].insert_one({**finding})
 
 
 async def get_top_findings(
