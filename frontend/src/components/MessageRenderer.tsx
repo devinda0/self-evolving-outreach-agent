@@ -1,6 +1,7 @@
 import type { Message, UIFrame } from "../store/campaignStore";
 import {
   BriefingCard,
+  SegmentSelector,
   ProspectPicker,
   VariantGrid,
   ChannelSelector,
@@ -27,6 +28,8 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
   switch (frame.component) {
     case "BriefingCard":
       return <BriefingCard {...props} />;
+    case "SegmentSelector":
+      return <SegmentSelector {...props} />;
     case "ProspectPicker":
       return <ProspectPicker {...props} />;
     case "VariantGrid":
