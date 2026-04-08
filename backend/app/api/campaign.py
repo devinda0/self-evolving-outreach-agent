@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
@@ -39,6 +40,16 @@ def _get_or_init_graph() -> CompiledStateGraph:
     if _graph is None:
         _graph = get_graph()
     return _graph
+
+
+def reset_graph() -> None:
+    """Discard the cached graph so the next call rebuilds it with the current DB.
+
+    Used in tests to ensure the checkpointer uses the active Motor client after
+    a DB teardown/setup cycle.
+    """
+    global _graph
+    _graph = None
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +163,10 @@ async def _run_graph_for_message(
     try:
         from langgraph.errors import GraphRecursionError
     except ImportError:
-        GraphRecursionError = Exception  # type: ignore[misc,assignment]
+        GraphRecursionError = Exception  # type: ignore[misc,assignment]  # noqa: N806
 
     graph = _get_or_init_graph()
-    config: dict[str, Any] = {
+    config: RunnableConfig = {
         "configurable": {"thread_id": session_id},
         "recursion_limit": 25,
     }
@@ -213,7 +224,7 @@ async def _run_graph_for_message(
 
     # Drain UI frames queued by specialist nodes (BriefingCard, SegmentSelector, etc.)
     try:
-        state_snap = await graph.aget_state(config)
+        state_snap = await graph.aget_state(config)  # type: ignore[arg-type]
         if state_snap and state_snap.values:
             for frame in state_snap.values.get("pending_ui_frames", []):
                 await websocket.send_json(frame)
@@ -232,9 +243,9 @@ async def _apply_ui_action(
     delta = _state_delta_for_action(action_id, payload)
     if delta:
         graph = _get_or_init_graph()
-        config: dict[str, Any] = {"configurable": {"thread_id": session_id}}
+        config: RunnableConfig = {"configurable": {"thread_id": session_id}}
         try:
-            await graph.aupdate_state(config, delta)
+            await graph.aupdate_state(config, delta)  # type: ignore[arg-type]
             logger.info("Applied UI action '%s' to graph state | session=%s", action_id, session_id)
         except Exception:
             logger.warning("Could not update graph state for action '%s'", action_id, exc_info=True)

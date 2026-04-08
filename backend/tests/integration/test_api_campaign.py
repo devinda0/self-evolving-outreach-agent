@@ -9,25 +9,9 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db.client import close_db, connect_db, get_db
-from app.db.crud import create_indexes
 from app.main import app
 
 TEST_DB = "signal_to_action_test"
-
-
-@pytest.fixture(autouse=True)
-async def _setup_teardown():
-    """Connect to a dedicated test database, create indexes, and clean up after."""
-    from app.core.config import settings
-
-    settings.DB_NAME = TEST_DB
-    await connect_db()
-    await create_indexes()
-    yield
-    db = get_db()
-    await db.client.drop_database(TEST_DB)
-    await close_db()
 
 
 # ---------------------------------------------------------------------------
