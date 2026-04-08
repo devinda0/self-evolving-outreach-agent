@@ -11,7 +11,6 @@ import pytest
 from app.agents.orchestrator import orchestrator_node
 from app.core.config import settings
 
-
 # Skip all tests in this module if GEMINI_API_KEY is not set
 pytestmark = [
     pytest.mark.integration,

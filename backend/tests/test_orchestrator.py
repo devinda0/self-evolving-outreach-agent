@@ -24,7 +24,6 @@ from app.agents.orchestrator import (
     orchestrator_node,
 )
 
-
 # ---------------------------------------------------------------------------
 # Minimal state helper
 # ---------------------------------------------------------------------------
@@ -242,7 +241,7 @@ class TestOrchestratorNode:
     async def test_generate_intent_after_research(self, mock_llm_response):
         """'Write me 3 email variants' after research → generate intent."""
         state = _make_state(
-            previous_intent="research",
+            current_intent="research",
             messages=[
                 {"role": "user", "content": "research competitors"},
                 {"role": "assistant", "content": "Here's the research briefing..."},

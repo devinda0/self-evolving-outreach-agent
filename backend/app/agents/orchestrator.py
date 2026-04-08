@@ -166,17 +166,26 @@ def _validate_and_normalize_result(result: dict[str, Any]) -> dict[str, Any]:
     """
     intent = result.get("current_intent", "clarify")
 
-    # Validate intent
+    # Validate intent — also handles missing key (default is "clarify")
     if intent not in VALID_INTENTS:
         logger.warning("Invalid intent '%s' from LLM, defaulting to 'clarify'", intent)
         intent = "clarify"
-        result["current_intent"] = intent
 
-    # Determine next_node from intent if not provided or invalid
-    next_node = result.get("next_node")
+    # Always write back to ensure the key exists in the result dict
+    result["current_intent"] = intent
+
+    # Determine next_node from intent — always enforce consistency
     expected_node = INTENT_TO_NODE.get(intent, "clarify")
+    next_node = result.get("next_node")
 
-    if next_node not in ("research", "segment", "generate", "deploy", "feedback", "clarify"):
+    if next_node != expected_node:
+        if next_node and next_node != expected_node:
+            logger.debug(
+                "Overriding LLM next_node '%s' with '%s' to match intent '%s'",
+                next_node,
+                expected_node,
+                intent,
+            )
         result["next_node"] = expected_node
 
     # Ensure clarification fields for clarify intent
@@ -232,7 +241,7 @@ Classify the latest user intent."""
 
     # Try to get classification from Gemini (with retry)
     max_retries = 2
-    last_error = None
+    last_error: Exception | None = None
 
     for attempt in range(max_retries):
         try:
