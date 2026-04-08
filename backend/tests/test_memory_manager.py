@@ -358,7 +358,9 @@ class TestBuildContextBundleFeedback:
 
 class TestMaybeSummarizeConversation:
     def _make_messages(self, n: int) -> list[dict]:
-        return [{"role": "user" if i % 2 == 0 else "ai", "content": f"Message {i}"} for i in range(n)]
+        return [
+            {"role": "user" if i % 2 == 0 else "ai", "content": f"Message {i}"} for i in range(n)
+        ]
 
     @pytest.mark.asyncio
     async def test_no_summary_when_below_threshold(self):
@@ -597,7 +599,9 @@ class TestOrchestratorMessageWindow:
     async def test_orchestrator_bundle_uses_12_message_window(self):
         """Orchestrator should receive up to 12 recent messages, not 8."""
         manager = _make_manager()
-        messages = [{"role": "user" if i % 2 == 0 else "ai", "content": f"msg {i}"} for i in range(20)]
+        messages = [
+            {"role": "user" if i % 2 == 0 else "ai", "content": f"msg {i}"} for i in range(20)
+        ]
         state = _make_state(messages=messages)
         bundle = await manager.build_context_bundle(state, "orchestrator")
 
@@ -610,7 +614,9 @@ class TestOrchestratorMessageWindow:
     async def test_non_orchestrator_agent_uses_8_message_window(self):
         """Non-orchestrator agents should use the default 8-message window."""
         manager = _make_manager()
-        messages = [{"role": "user" if i % 2 == 0 else "ai", "content": f"msg {i}"} for i in range(20)]
+        messages = [
+            {"role": "user" if i % 2 == 0 else "ai", "content": f"msg {i}"} for i in range(20)
+        ]
         state = _make_state(messages=messages)
         bundle = await manager.build_context_bundle(state, "content")
 
@@ -665,7 +671,9 @@ class TestBundleSizeLogging:
 
 class TestMaybeSummarizeNode:
     def _make_messages(self, n: int) -> list[dict]:
-        return [{"role": "user" if i % 2 == 0 else "ai", "content": f"Message {i}"} for i in range(n)]
+        return [
+            {"role": "user" if i % 2 == 0 else "ai", "content": f"Message {i}"} for i in range(n)
+        ]
 
     @pytest.mark.asyncio
     async def test_no_op_below_threshold(self):
@@ -759,7 +767,9 @@ class TestMaybeSummarizeNode:
 class TestLogDecision:
     def test_appends_segment_selected_entry(self):
         state = _make_state(decision_log=[])
-        patch = log_decision(state, {"type": "segment_selected", "segment_id": "seg-001", "label": "VP Sales"})
+        patch = log_decision(
+            state, {"type": "segment_selected", "segment_id": "seg-001", "label": "VP Sales"}
+        )
         log = patch["decision_log"]
         assert len(log) == 1
         entry = log[0]
@@ -771,7 +781,9 @@ class TestLogDecision:
 
     def test_appends_variants_selected_entry(self):
         state = _make_state(decision_log=[])
-        patch = log_decision(state, {"type": "variants_selected", "variant_ids": ["var-001", "var-002"]})
+        patch = log_decision(
+            state, {"type": "variants_selected", "variant_ids": ["var-001", "var-002"]}
+        )
         entry = patch["decision_log"][0]
         assert entry["type"] == "variants_selected"
         assert entry["variant_ids"] == ["var-001", "var-002"]
@@ -794,7 +806,9 @@ class TestLogDecision:
     def test_preserves_existing_log_entries(self):
         existing = [{"id": "existing-1", "type": "summary", "created_at": "2026-01-01"}]
         state = _make_state(decision_log=existing)
-        patch = log_decision(state, {"type": "segment_selected", "segment_id": "seg-001", "label": "X"})
+        patch = log_decision(
+            state, {"type": "segment_selected", "segment_id": "seg-001", "label": "X"}
+        )
         log = patch["decision_log"]
         assert len(log) == 2
         assert log[0]["id"] == "existing-1"
@@ -802,9 +816,13 @@ class TestLogDecision:
 
     def test_each_entry_has_unique_id(self):
         state = _make_state(decision_log=[])
-        patch1 = log_decision(state, {"type": "segment_selected", "segment_id": "seg-001", "label": "A"})
+        patch1 = log_decision(
+            state, {"type": "segment_selected", "segment_id": "seg-001", "label": "A"}
+        )
         state2 = _make_state(decision_log=patch1["decision_log"])
-        patch2 = log_decision(state2, {"type": "segment_selected", "segment_id": "seg-002", "label": "B"})
+        patch2 = log_decision(
+            state2, {"type": "segment_selected", "segment_id": "seg-002", "label": "B"}
+        )
         ids = [e["id"] for e in patch2["decision_log"]]
         assert ids[0] != ids[1]
 
@@ -823,7 +841,9 @@ class TestLogDecision:
 
         agent_types = ["orchestrator", "research", "segment", "content", "deployment", "feedback"]
         with caplog.at_level(logging.DEBUG, logger="app.memory.manager"):
-            with patch("app.memory.manager.get_top_findings", new_callable=AsyncMock, return_value=[]):
+            with patch(
+                "app.memory.manager.get_top_findings", new_callable=AsyncMock, return_value=[]
+            ):
                 for agent_type in agent_types:
                     await manager.build_context_bundle(state, agent_type)
 

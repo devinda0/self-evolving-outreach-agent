@@ -322,7 +322,43 @@ def build_feedback_prompt_frame(instance_id: str) -> dict:
                 action_type="manual_feedback",
                 payload={},
             ),
+            UIAction(
+                id="view-quarantine",
+                label="View Quarantine",
+                action_type="view_quarantine",
+                payload={},
+            ),
         ],
+    ).model_dump()
+
+
+def build_manual_feedback_frame(deployment_records: list[dict], instance_id: str) -> dict:
+    """Build a ManualFeedbackInput UI frame with distinct variants from deployment records."""
+    seen: set[str] = set()
+    variants: list[dict] = []
+    for rec in deployment_records:
+        v_id = rec.get("variant_id")
+        if v_id and v_id not in seen:
+            seen.add(v_id)
+            variants.append({"id": v_id, "label": f"Variant {v_id[:8]}"})
+
+    return UIFrame(
+        type="ui_component",
+        component="ManualFeedbackInput",
+        instance_id=instance_id,
+        props={"variants": variants},
+        actions=[],
+    ).model_dump()
+
+
+def build_quarantine_viewer_frame(events: list[dict], instance_id: str) -> dict:
+    """Build a QuarantineViewer UI frame showing unmatched/quarantined events."""
+    return UIFrame(
+        type="ui_component",
+        component="QuarantineViewer",
+        instance_id=instance_id,
+        props={"events": events},
+        actions=[],
     ).model_dump()
 
 

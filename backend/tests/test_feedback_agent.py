@@ -21,6 +21,8 @@ from app.agents.feedback_agent import (
     build_ab_results_frame,
     build_cycle_summary_frame,
     build_feedback_prompt_frame,
+    build_manual_feedback_frame,
+    build_quarantine_viewer_frame,
     compute_confidence_updates,
     determine_winner,
     feedback_agent_node,
@@ -356,7 +358,49 @@ class TestUIFrameBuilders:
     def test_feedback_prompt_frame_structure(self):
         frame = build_feedback_prompt_frame("instance-3")
         assert frame["component"] == "FeedbackPrompt"
-        assert len(frame["actions"]) >= 1
+        assert len(frame["actions"]) >= 2
+        action_types = {a["action_type"] for a in frame["actions"]}
+        assert "manual_feedback" in action_types
+        assert "view_quarantine" in action_types
+
+    def test_manual_feedback_frame_with_variants(self):
+        records = [
+            {"id": "d1", "variant_id": "var-A", "prospect_id": "p1"},
+            {"id": "d2", "variant_id": "var-A", "prospect_id": "p2"},  # duplicate variant
+            {"id": "d3", "variant_id": "var-B", "prospect_id": "p3"},
+        ]
+        frame = build_manual_feedback_frame(records, "mf-instance-1")
+        assert frame["component"] == "ManualFeedbackInput"
+        variants = frame["props"]["variants"]
+        # Deduplication: var-A and var-B → 2 entries
+        assert len(variants) == 2
+        ids = {v["id"] for v in variants}
+        assert "var-A" in ids
+        assert "var-B" in ids
+
+    def test_manual_feedback_frame_empty_records(self):
+        frame = build_manual_feedback_frame([], "mf-instance-2")
+        assert frame["component"] == "ManualFeedbackInput"
+        assert frame["props"]["variants"] == []
+
+    def test_quarantine_viewer_frame_with_events(self):
+        events = [
+            {
+                "provider": "resend",
+                "event_type": "open",
+                "provider_message_id": "msg-001",
+                "quarantine_reason": "no_matching_deployment_record",
+                "received_at": "2026-04-01T00:00:00+00:00",
+            }
+        ]
+        frame = build_quarantine_viewer_frame(events, "qv-instance-1")
+        assert frame["component"] == "QuarantineViewer"
+        assert frame["props"]["events"] == events
+
+    def test_quarantine_viewer_frame_empty(self):
+        frame = build_quarantine_viewer_frame([], "qv-instance-2")
+        assert frame["component"] == "QuarantineViewer"
+        assert frame["props"]["events"] == []
 
 
 # ---------------------------------------------------------------------------

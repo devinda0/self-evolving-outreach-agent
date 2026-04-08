@@ -181,6 +181,17 @@ async def save_quarantine_event(event: dict[str, Any]) -> None:
     await db[QUARANTINE].insert_one({**event})
 
 
+async def get_quarantine_events_for_session(session_id: str) -> list[dict[str, Any]]:
+    """Return all quarantined events for a session, ordered by received_at ascending."""
+    db = get_db()
+    cursor = db[QUARANTINE].find({"session_id": session_id}).sort("received_at", ASCENDING)
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Intelligence entries
 # ---------------------------------------------------------------------------
@@ -308,6 +319,7 @@ async def create_indexes() -> None:
     await db[INTELLIGENCE_ENTRIES].create_index(
         [("session_id", ASCENDING), ("cycle_number", ASCENDING)]
     )
+    await db[QUARANTINE].create_index([("session_id", ASCENDING), ("received_at", ASCENDING)])
 
 
 # ---------------------------------------------------------------------------

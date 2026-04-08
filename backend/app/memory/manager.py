@@ -134,17 +134,13 @@ class MemoryManager:
     # Public API
     # ------------------------------------------------------------------
 
-    async def build_context_bundle(
-        self, state: CampaignState, agent_type: str
-    ) -> dict:
+    async def build_context_bundle(self, state: CampaignState, agent_type: str) -> dict:
         """Build a scoped context bundle for the specified agent.
 
         Each agent gets only what it needs — not the full raw session.
         """
         message_window = (
-            _ORCHESTRATOR_MESSAGE_WINDOW
-            if agent_type == "orchestrator"
-            else _RECENT_MESSAGE_WINDOW
+            _ORCHESTRATOR_MESSAGE_WINDOW if agent_type == "orchestrator" else _RECENT_MESSAGE_WINDOW
         )
         base: dict[str, Any] = {
             "task_header": self._get_task_header(state, agent_type),
@@ -343,9 +339,7 @@ class MemoryManager:
         """Return the top-k findings already loaded into state (no DB call)."""
         findings = state.get("research_findings", [])
         # Sort by confidence descending, return top-k
-        sorted_findings = sorted(
-            findings, key=lambda f: f.get("confidence", 0.0), reverse=True
-        )
+        sorted_findings = sorted(findings, key=lambda f: f.get("confidence", 0.0), reverse=True)
         return sorted_findings[:k]
 
     def _get_findings_by_ids(self, state: CampaignState) -> list:
