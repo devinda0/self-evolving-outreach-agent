@@ -6,6 +6,8 @@ the actual Gemini 2.5 Pro model. Run with: pytest -m integration
 Requires GEMINI_API_KEY to be set in environment or .env file.
 """
 
+import asyncio
+
 import pytest
 
 from app.agents.orchestrator import orchestrator_node
@@ -287,6 +289,8 @@ async def test_multiple_intents_batch():
         assert result["current_intent"] == case["expected_intent"], (
             f"Expected {case['expected_intent']} for message: {case['messages'][0]['content']}"
         )
+        # Avoid Gemini rate-limit flakiness when running sequentially in a large test suite
+        await asyncio.sleep(2)
 
 
 @pytest.mark.integration

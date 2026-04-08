@@ -38,6 +38,9 @@ _CHARS_PER_TOKEN = 4
 # Number of recent messages preserved verbatim in summaries / context bundles
 _RECENT_MESSAGE_WINDOW = 8
 
+# Orchestrator needs a slightly larger window to capture full conversation intent
+_ORCHESTRATOR_MESSAGE_WINDOW = 12
+
 # Trigger conversation summarisation after this many messages
 _SUMMARISE_THRESHOLD = 20
 
@@ -124,11 +127,16 @@ class MemoryManager:
 
         Each agent gets only what it needs — not the full raw session.
         """
+        message_window = (
+            _ORCHESTRATOR_MESSAGE_WINDOW
+            if agent_type == "orchestrator"
+            else _RECENT_MESSAGE_WINDOW
+        )
         base: dict[str, Any] = {
             "task_header": self._get_task_header(state, agent_type),
             "current_stage_state": self._get_stage_state(state, agent_type),
             "latest_user_intent": state.get("current_intent"),
-            "recent_messages": self._get_recent_messages(state, n=_RECENT_MESSAGE_WINDOW),
+            "recent_messages": self._get_recent_messages(state, n=message_window),
             "relevant_cycle_summary": state.get("prior_cycle_summary"),
         }
 
@@ -155,7 +163,16 @@ class MemoryManager:
             base["deployment_records"] = state.get("deployment_records", [])
             base["normalized_metrics"] = state.get("normalized_feedback_events", [])
 
-        return enforce_token_budget(base, agent_type)
+        bundle = enforce_token_budget(base, agent_type)
+        approx_chars = sum(len(str(v)) for v in bundle.values())
+        approx_tokens = approx_chars // _CHARS_PER_TOKEN
+        logger.debug(
+            "build_context_bundle: agent=%s approx_tokens=%d bundle_keys=%s",
+            agent_type,
+            approx_tokens,
+            list(bundle.keys()),
+        )
+        return bundle
 
     async def maybe_summarize_conversation(self, state: CampaignState) -> dict:
         """If the conversation exceeds 20 messages, generate a rolling summary.
