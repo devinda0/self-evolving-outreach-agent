@@ -293,12 +293,8 @@ async def research_thread_node(state: CampaignState) -> dict:
         prior_findings = bundle.get("top_long_term_findings", [])
         prior_intelligence: str | None = None
         if prior_findings:
-            summaries = [
-                f.get("claim", "") for f in prior_findings if f.get("claim")
-            ]
-            prior_intelligence = "Prior intelligence:\n" + "\n".join(
-                f"- {s}" for s in summaries
-            )
+            summaries = [f.get("claim", "") for f in prior_findings if f.get("claim")]
+            prior_intelligence = "Prior intelligence:\n" + "\n".join(f"- {s}" for s in summaries)
     except Exception as exc:
         logger.warning(
             "research_thread_node: memory bundle failed (%s) — continuing without prior intelligence",

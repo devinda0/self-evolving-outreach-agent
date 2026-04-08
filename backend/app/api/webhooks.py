@@ -10,12 +10,14 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.db.crud import (
     get_deployment_by_provider_message_id,
     get_feedback_event_by_dedupe_key,
     get_feedback_events_for_session,
+    get_quarantine_events_for_session,
     save_feedback_event,
     save_quarantine_event,
 )
@@ -289,3 +291,76 @@ async def _ingest_event(
     else:
         await save_quarantine_event(normalized)
         logger.warning("Quarantined unmatched event: %s", dedupe_key)
+
+
+# ---------------------------------------------------------------------------
+# Manual feedback submission
+# ---------------------------------------------------------------------------
+
+
+class ManualFeedbackRequest(BaseModel):
+    """Body schema for manual feedback reports submitted from the UI."""
+
+    variant_id: str | None = None
+    prospect_id: str | None = None
+    event_type: str  # "open" | "click" | "reply" | "bounce"
+    qualitative_signal: str | None = None
+
+
+@router.post("/campaign/{session_id}/feedback/manual")
+async def submit_manual_feedback(
+    session_id: str,
+    body: ManualFeedbackRequest,
+) -> dict[str, str]:
+    """Accept a manual feedback report for a session from the UI.
+
+    Validates the event_type, constructs a NormalizedFeedbackEvent with
+    ``provider="manual"``, and stores it directly in feedback_events (not
+    quarantine) because the user is the authoritative source.
+    """
+    allowed_types = {"open", "click", "reply", "bounce"}
+    if body.event_type not in allowed_types:
+        raise HTTPException(
+            status_code=422,
+            detail=f"event_type must be one of {sorted(allowed_types)}",
+        )
+
+    now = datetime.now(tz=timezone.utc)
+    dedupe_key = f"manual:{session_id}:{body.variant_id or ''}:{body.event_type}:{uuid4().hex}"
+
+    normalized: dict[str, Any] = {
+        "provider": "manual",
+        "provider_event_id": None,
+        "provider_message_id": None,
+        "deployment_record_id": None,
+        "session_id": session_id,
+        "variant_id": body.variant_id,
+        "prospect_id": body.prospect_id,
+        "channel": "manual",
+        "event_type": body.event_type,
+        "event_value": None,
+        "qualitative_signal": body.qualitative_signal,
+        "received_at": now.isoformat(),
+        "dedupe_key": dedupe_key,
+    }
+
+    await save_feedback_event(normalized)
+    logger.info(
+        "submit_manual_feedback: stored manual event | session=%s variant=%s type=%s",
+        session_id,
+        body.variant_id,
+        body.event_type,
+    )
+    return {"status": "accepted"}
+
+
+# ---------------------------------------------------------------------------
+# Quarantine viewer endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/campaign/{session_id}/quarantine")
+async def get_quarantine_events(session_id: str) -> list[dict[str, Any]]:
+    """Return all quarantined events for a session, ordered by received_at."""
+    events = await get_quarantine_events_for_session(session_id)
+    return events

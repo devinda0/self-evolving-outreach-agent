@@ -239,6 +239,48 @@ _INTENT_TO_USER_MESSAGE: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# UI-action helpers for feedback features
+# ---------------------------------------------------------------------------
+
+
+async def _handle_manual_feedback_action(websocket: WebSocket, session_id: str) -> None:
+    """Emit a ManualFeedbackInput UI frame populated with the session's deployed variants."""
+    from app.agents.feedback_agent import build_manual_feedback_frame
+
+    graph = _get_or_init_graph()
+    config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+    records: list[dict] = []
+    try:
+        state_snap = await graph.aget_state(config)  # type: ignore[arg-type]
+        if state_snap and state_snap.values:
+            records = state_snap.values.get("deployment_records", [])
+    except Exception:
+        logger.warning("_handle_manual_feedback_action: could not load graph state", exc_info=True)
+
+    instance_id = f"manual-feedback-{uuid.uuid4().hex[:8]}"
+    frame = build_manual_feedback_frame(records, instance_id)
+    await _send_json_safe(websocket, frame)
+    await websocket.send_json({"type": "token_end"})
+
+
+async def _handle_view_quarantine_action(websocket: WebSocket, session_id: str) -> None:
+    """Fetch quarantined events and emit a QuarantineViewer UI frame."""
+    from app.agents.feedback_agent import build_quarantine_viewer_frame
+    from app.db.crud import get_quarantine_events_for_session
+
+    events: list[dict] = []
+    try:
+        events = await get_quarantine_events_for_session(session_id)
+    except Exception:
+        logger.warning("_handle_view_quarantine_action: could not load quarantine", exc_info=True)
+
+    instance_id = f"quarantine-{uuid.uuid4().hex[:8]}"
+    frame = build_quarantine_viewer_frame(events, instance_id)
+    await _send_json_safe(websocket, frame)
+    await websocket.send_json({"type": "token_end"})
+
+
+# ---------------------------------------------------------------------------
 # Core graph invocation helpers
 # ---------------------------------------------------------------------------
 
@@ -448,6 +490,16 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                 if payload.get("response"):
                     content = str(payload["response"])
                     await _run_graph_for_message(websocket, session_id, content, db_state)
+                    continue
+
+                # Manual feedback input — build and emit ManualFeedbackInput frame
+                if action_id == "manual_feedback":
+                    await _handle_manual_feedback_action(websocket, session_id)
+                    continue
+
+                # View quarantine — fetch events and emit QuarantineViewer frame
+                if action_id == "view_quarantine":
+                    await _handle_view_quarantine_action(websocket, session_id)
                     continue
 
                 # Actions that require a graph re-run (navigation, deploy, confirm)

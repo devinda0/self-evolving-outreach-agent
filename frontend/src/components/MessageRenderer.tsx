@@ -14,6 +14,9 @@ import {
   ResearchProgress,
   ClarificationPrompt,
   ErrorCard,
+  FeedbackPrompt,
+  ManualFeedbackInput,
+  QuarantineViewer,
 } from "./stubs";
 
 // ---------------------------------------------------------------------------
@@ -238,6 +241,12 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <ResearchProgress {...props} />;
     case "ClarificationPrompt":
       return <ClarificationPrompt {...props} />;
+    case "FeedbackPrompt":
+      return <FeedbackPrompt {...props} />;
+    case "ManualFeedbackInput":
+      return <ManualFeedbackInput {...props} />;
+    case "QuarantineViewer":
+      return <QuarantineViewer {...props} />;
     case "ErrorCard":
       return <ErrorCard {...props} />;
     default:

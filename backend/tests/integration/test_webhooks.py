@@ -353,3 +353,116 @@ async def test_resend_webhook_accepts_valid_signature():
             )
 
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /campaign/{session_id}/feedback/manual — issue #26
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_manual_feedback_creates_feedback_event():
+    """POST /campaign/{session_id}/feedback/manual stores a feedback event directly."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/campaign/sess-manual-001/feedback/manual",
+            json={
+                "variant_id": "var-A",
+                "event_type": "reply",
+                "qualitative_signal": "Great response rate!",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "accepted"
+
+    db = get_db()
+    events = []
+    async for doc in db[FEEDBACK_EVENTS].find({"session_id": "sess-manual-001"}):
+        doc.pop("_id", None)
+        events.append(doc)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["provider"] == "manual"
+    assert event["event_type"] == "reply"
+    assert event["variant_id"] == "var-A"
+    assert event["qualitative_signal"] == "Great response rate!"
+    assert event["channel"] == "manual"
+
+
+@pytest.mark.integration
+async def test_manual_feedback_rejects_invalid_event_type():
+    """POST /campaign/{session_id}/feedback/manual with invalid event_type returns 422."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/campaign/sess-manual-002/feedback/manual",
+            json={"event_type": "delivered"},  # not a valid type
+        )
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.integration
+async def test_manual_feedback_without_variant_id():
+    """Manual feedback with no variant_id still stores event at session level."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/campaign/sess-manual-003/feedback/manual",
+            json={"event_type": "open"},
+        )
+
+    assert resp.status_code == 200
+
+    db = get_db()
+    event = await db[FEEDBACK_EVENTS].find_one({"session_id": "sess-manual-003"})
+    assert event is not None
+    assert event["variant_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# GET /campaign/{session_id}/quarantine — issue #26
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_get_quarantine_events_returns_session_events():
+    """GET /campaign/{session_id}/quarantine returns quarantined events for the session."""
+    db = get_db()
+    await db[QUARANTINE].insert_one(
+        {
+            "provider": "resend",
+            "provider_message_id": "msg-qv-sessioned",
+            "session_id": "sess-qv-test",
+            "event_type": "open",
+            "channel": "email",
+            "quarantine_reason": "no_matching_deployment_record",
+            "received_at": "2026-04-01T00:00:00+00:00",
+            "dedupe_key": "manual-qv-sessioned",
+        }
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/campaign/sess-qv-test/quarantine")
+
+    assert resp.status_code == 200
+    events = resp.json()
+    assert len(events) == 1
+    assert events[0]["provider"] == "resend"
+    assert events[0]["session_id"] == "sess-qv-test"
+    assert events[0]["quarantine_reason"] == "no_matching_deployment_record"
+
+
+@pytest.mark.integration
+async def test_get_quarantine_events_returns_empty_for_unknown_session():
+    """GET /campaign/{session_id}/quarantine returns [] when no events exist for that session."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/campaign/sess-never-existed/quarantine")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
