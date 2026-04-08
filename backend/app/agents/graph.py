@@ -13,6 +13,7 @@ from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
 from app.agents.content_agent import content_agent_node
+from app.agents.deployment_agent import deployment_agent_node
 from app.agents.orchestrator import clarify_node, orchestrator_node
 from app.agents.research import (
     research_dispatcher_node,
@@ -65,16 +66,6 @@ def research_fan_out(state: CampaignState) -> list[Send]:
 # ---------------------------------------------------------------------------
 
 
-
-async def deployment_agent_node(state: CampaignState) -> dict:
-    """STUB: deploy selected variants."""
-    logger.info("deployment_agent_node called | session=%s", state.get("session_id"))
-    return {
-        "deployment_records": [{"id": "dep-stub-1", "status": "simulated"}],
-        "deployment_confirmed": True,
-    }
-
-
 async def feedback_agent_node(state: CampaignState) -> dict:
     """STUB: process engagement feedback."""
     logger.info("feedback_agent_node called | session=%s", state.get("session_id"))
@@ -84,6 +75,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
 
 
 # Note: orchestrator_node and clarify_node are imported from app.agents.orchestrator
+# Note: deployment_agent_node is imported from app.agents.deployment_agent
 
 
 # ---------------------------------------------------------------------------

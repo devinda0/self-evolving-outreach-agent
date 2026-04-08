@@ -19,6 +19,10 @@ export function DeploymentConfirm(props: Props) {
   return <StubComponent {...props} />;
 }
 
+export function DeliveryStatusCard(props: Props) {
+  return <StubComponent {...props} />;
+}
+
 export function ABResults(props: Props) {
   return <StubComponent {...props} />;
 }
