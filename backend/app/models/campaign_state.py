@@ -36,6 +36,7 @@ class CampaignState(TypedDict):
     research_query: Optional[str]
     active_thread_types: list[str]
     thread_type: Optional[str]  # Injected by research fan-out Send
+    research_policy: dict  # Research policy controlling thread behavior
     research_findings: Annotated[list, operator.add]
     briefing_summary: Optional[str]
     research_gaps: list[str]
