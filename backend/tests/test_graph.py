@@ -9,10 +9,10 @@ These tests verify:
 
 import pytest
 
+from app.agents.content_agent import content_agent_node
+from app.agents.deployment_agent import deployment_agent_node
 from app.agents.graph import (
     build_graph,
-    content_agent_node,
-    deployment_agent_node,
     feedback_agent_node,
     research_fan_out,
     route_from_orchestrator,
@@ -228,10 +228,53 @@ async def test_content_agent_node_returns_variants():
     assert len(result["content_variants"]) >= 2
 
 
-async def test_deployment_agent_node_returns_records():
-    result = await deployment_agent_node(_make_state())
-    assert len(result["deployment_records"]) >= 1
-    assert result["deployment_confirmed"] is True
+async def test_deployment_agent_node_emits_confirm_when_not_confirmed():
+    """Deployment agent emits DeploymentConfirm when deployment_confirmed=False."""
+    state = _make_state(
+        deployment_confirmed=False,
+        content_variants=[
+            {"id": "v1", "body": "Hi {{first_name}}", "intended_channel": "email", "angle_label": "test"},
+        ],
+        selected_variant_ids=["v1"],
+        prospect_cards=[
+            {"id": "p1", "name": "Jane Doe", "company": "Acme Corp"},
+        ],
+        selected_prospect_ids=["p1"],
+    )
+    result = await deployment_agent_node(state)
+    assert result["next_node"] == "orchestrator"
+    assert "pending_ui_frames" in result
+    assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"
+    assert "ab_split_plan" in result
+
+
+async def test_deployment_agent_node_sends_when_confirmed():
+    """Deployment agent creates deployment records when confirmed."""
+    from unittest.mock import AsyncMock, patch
+
+    state = _make_state(
+        deployment_confirmed=True,
+        content_variants=[
+            {"id": "v1", "body": "Hi {{first_name}} at {{company}}", "intended_channel": "email", "angle_label": "test"},
+            {"id": "v2", "body": "Hey {{first_name}}", "intended_channel": "email", "angle_label": "roi"},
+        ],
+        selected_variant_ids=["v1", "v2"],
+        prospect_cards=[
+            {"id": "p1", "name": "Jane Doe", "company": "Acme Corp"},
+            {"id": "p2", "name": "Bob Smith", "company": "WidgetCo"},
+        ],
+        selected_prospect_ids=["p1", "p2"],
+    )
+    with patch("app.agents.deployment_agent.save_deployment_record", new_callable=AsyncMock):
+        result = await deployment_agent_node(state)
+    assert len(result["deployment_records"]) == 2
+    assert result["deployment_confirmed"] is False  # reset for next cycle
+    assert result["next_node"] == "orchestrator"
+    # Each record has unique provider_message_id
+    msg_ids = {r["provider_message_id"] for r in result["deployment_records"]}
+    assert len(msg_ids) == 2
+    # Check UI frame
+    assert result["pending_ui_frames"][0]["component"] == "DeliveryStatusCard"
 
 
 async def test_feedback_agent_node_returns_results():

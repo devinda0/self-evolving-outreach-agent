@@ -8,6 +8,7 @@ export {
   VariantGrid,
   ChannelSelector,
   DeploymentConfirm,
+  DeliveryStatusCard,
   ABResults,
   CycleSummary,
   ErrorCard,
