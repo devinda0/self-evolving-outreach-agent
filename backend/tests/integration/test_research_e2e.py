@@ -42,6 +42,7 @@ TEST_DB = "signal_to_action_test_research_e2e"
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 async def _setup_teardown():
     """Connect to a dedicated test database, create indexes, and clean up after."""
@@ -178,6 +179,7 @@ def _make_campaign_state(session_id: str) -> dict:
 # 1. Full research subgraph e2e: dispatcher → fan-out → threads → synthesizer
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_research_e2e_full_pipeline():
     """Start session → run all research nodes → verify findings persisted + BriefingCard emitted."""
@@ -187,7 +189,12 @@ async def test_research_e2e_full_pipeline():
 
     # --- Step 1: Dispatcher ---
     dispatcher_result = await research_dispatcher_node(state)
-    assert set(dispatcher_result["active_thread_types"]) == {"competitor", "audience", "channel", "market"}
+    assert set(dispatcher_result["active_thread_types"]) == {
+        "competitor",
+        "audience",
+        "channel",
+        "market",
+    }
     state.update(dispatcher_result)
 
     # --- Step 2: Fan-out sends ---
@@ -279,6 +286,7 @@ async def test_research_e2e_full_pipeline():
 # 2. Campaign state round-trip with research results
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_research_state_persistence():
     """Verify campaign state is correctly updated after research completes."""
@@ -331,6 +339,7 @@ async def test_research_state_persistence():
 # ---------------------------------------------------------------------------
 # 3. Failed thread graceful degradation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_research_e2e_failed_thread_continues():
@@ -403,6 +412,7 @@ async def test_research_e2e_failed_thread_continues():
 # ---------------------------------------------------------------------------
 # 4. REST API → research subgraph: start session, verify state
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_api_start_then_research():
@@ -485,6 +495,7 @@ async def test_api_start_then_research():
 # 5. Policy enforcement: max_pages_to_extract respected end-to-end
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_research_e2e_policy_enforcement():
     """Verify the max_pages_to_extract policy is respected across full pipeline."""
@@ -531,6 +542,7 @@ async def test_research_e2e_policy_enforcement():
 # ---------------------------------------------------------------------------
 # 6. Deduplication across threads
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_research_e2e_deduplication():

@@ -46,6 +46,7 @@ def _mock_post_factory(json_body: dict, status_code: int = 200):
 # search_web
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_search_web_returns_results():
     mock_post = _mock_post_factory({"results": FAKE_SEARCH_RESULTS})
@@ -120,6 +121,7 @@ async def test_search_web_connect_error_returns_empty():
 # extract_page
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_extract_page_returns_text():
     mock_post = _mock_post_factory(FAKE_EXTRACT_RESPONSE)
@@ -165,6 +167,7 @@ async def test_extract_page_timeout_returns_empty():
 # search_news delegates to search_web
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_search_news_appends_news_keyword():
     mock_post = _mock_post_factory({"results": FAKE_SEARCH_RESULTS})
@@ -187,6 +190,7 @@ async def test_search_news_appends_news_keyword():
 # search_community delegates to search_web
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_search_community_uses_site_filter():
     mock_post = _mock_post_factory({"results": FAKE_SEARCH_RESULTS})
@@ -207,6 +211,7 @@ async def test_search_community_uses_site_filter():
 # ---------------------------------------------------------------------------
 # DEFAULT_RESEARCH_POLICY
 # ---------------------------------------------------------------------------
+
 
 def test_default_research_policy_has_required_keys():
     assert set(DEFAULT_RESEARCH_POLICY.keys()) == {

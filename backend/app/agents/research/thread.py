@@ -101,7 +101,7 @@ def _parse_json_response(content: str) -> list | dict:
     if content.startswith("```"):
         first_newline = content.find("\n")
         if first_newline != -1:
-            content = content[first_newline + 1:]
+            content = content[first_newline + 1 :]
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
@@ -224,26 +224,30 @@ def _normalize_finding(raw: dict, thread_type: str) -> dict:
 def _mock_findings(thread_type: str, raw_results: list[dict]) -> list[dict]:
     findings = []
     for i, r in enumerate(raw_results[:2]):
-        findings.append({
-            "claim": r.get("title", f"Finding from {thread_type} thread"),
-            "evidence": (r.get("content", "") or "")[:200],
-            "source_url": r.get("url", ""),
-            "confidence": round(max(0.3, min(0.8, r.get("score", 0.5))), 2),
-            "audience_language": [],
-            "actionable_implication": f"Review {thread_type} signal for outreach angle",
-            "thread_type": thread_type,
-        })
+        findings.append(
+            {
+                "claim": r.get("title", f"Finding from {thread_type} thread"),
+                "evidence": (r.get("content", "") or "")[:200],
+                "source_url": r.get("url", ""),
+                "confidence": round(max(0.3, min(0.8, r.get("score", 0.5))), 2),
+                "audience_language": [],
+                "actionable_implication": f"Review {thread_type} signal for outreach angle",
+                "thread_type": thread_type,
+            }
+        )
     # Ensure at least 2 findings
     while len(findings) < 2:
-        findings.append({
-            "claim": f"Placeholder finding from {thread_type} thread",
-            "evidence": "Insufficient search results for deeper analysis",
-            "source_url": "",
-            "confidence": 0.3,
-            "audience_language": [],
-            "actionable_implication": f"Requires deeper {thread_type} research",
-            "thread_type": thread_type,
-        })
+        findings.append(
+            {
+                "claim": f"Placeholder finding from {thread_type} thread",
+                "evidence": "Insufficient search results for deeper analysis",
+                "source_url": "",
+                "confidence": 0.3,
+                "audience_language": [],
+                "actionable_implication": f"Requires deeper {thread_type} research",
+                "thread_type": thread_type,
+            }
+        )
     return findings
 
 

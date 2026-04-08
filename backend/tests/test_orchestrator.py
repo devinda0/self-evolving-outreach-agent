@@ -194,24 +194,26 @@ class TestOrchestratorNode:
     @pytest.fixture
     def mock_llm_response(self):
         """Create a mock LLM response."""
+
         def _create_response(intent: str, **kwargs):
             response_data = {
                 "current_intent": intent,
                 "reasoning": f"User wants to {intent}",
                 "clarification_question": kwargs.get("question"),
                 "clarification_options": kwargs.get("options", []),
-                "next_node": kwargs.get("next_node", intent if intent != "refined_cycle" else "clarify"),
+                "next_node": kwargs.get(
+                    "next_node", intent if intent != "refined_cycle" else "clarify"
+                ),
             }
             mock = MagicMock()
             mock.content = json.dumps(response_data)
             return mock
+
         return _create_response
 
     async def test_research_intent(self, mock_llm_response):
         """User message 'research my competitors' → research intent."""
-        state = _make_state(
-            messages=[{"role": "user", "content": "research my competitors"}]
-        )
+        state = _make_state(messages=[{"role": "user", "content": "research my competitors"}])
 
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value = mock_llm_response("research", next_node="research")
@@ -305,9 +307,7 @@ class TestOrchestratorNode:
 
     async def test_ambiguous_input_clarify(self, mock_llm_response):
         """Ambiguous input 'go' → clarify with question."""
-        state = _make_state(
-            messages=[{"role": "user", "content": "go"}]
-        )
+        state = _make_state(messages=[{"role": "user", "content": "go"}])
 
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value = mock_llm_response(
@@ -327,9 +327,7 @@ class TestOrchestratorNode:
 
     async def test_malformed_response_retries_and_falls_back(self):
         """Malformed Gemini response → retries once, then defaults to clarify."""
-        state = _make_state(
-            messages=[{"role": "user", "content": "do something"}]
-        )
+        state = _make_state(messages=[{"role": "user", "content": "do something"}])
 
         mock_llm = AsyncMock()
         # Both attempts return malformed JSON
@@ -351,9 +349,7 @@ class TestOrchestratorNode:
 
     async def test_api_error_retries_and_falls_back(self):
         """Gemini API error → retries once, then defaults to clarify."""
-        state = _make_state(
-            messages=[{"role": "user", "content": "test"}]
-        )
+        state = _make_state(messages=[{"role": "user", "content": "test"}])
 
         mock_llm = AsyncMock()
         mock_llm.ainvoke.side_effect = Exception("API rate limit exceeded")
@@ -369,9 +365,7 @@ class TestOrchestratorNode:
 
     async def test_mock_llm_mode(self):
         """USE_MOCK_LLM=true returns default clarify response."""
-        state = _make_state(
-            messages=[{"role": "user", "content": "research competitors"}]
-        )
+        state = _make_state(messages=[{"role": "user", "content": "research competitors"}])
 
         with patch("app.agents.orchestrator._get_llm", return_value=None):
             result = await orchestrator_node(state)

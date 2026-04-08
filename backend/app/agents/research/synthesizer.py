@@ -63,7 +63,7 @@ def _parse_json_response(content: str) -> dict:
     if content.startswith("```"):
         first_newline = content.find("\n")
         if first_newline != -1:
-            content = content[first_newline + 1:]
+            content = content[first_newline + 1 :]
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
@@ -118,8 +118,11 @@ def _mock_briefing(findings: list[dict]) -> dict:
         ),
         "key_themes": [f"Theme from {t} analysis" for t in thread_types],
         "top_opportunities": [f.get("actionable_implication", "") for f in findings[:3]],
-        "gaps": [f"Deeper {t} research needed" for t in thread_types if t not in
-                 {f.get("thread_type") for f in findings if f.get("confidence", 0) > 0.6}],
+        "gaps": [
+            f"Deeper {t} research needed"
+            for t in thread_types
+            if t not in {f.get("thread_type") for f in findings if f.get("confidence", 0) > 0.6}
+        ],
         "recommended_next_steps": ["Define target segment", "Generate content variants"],
     }
 

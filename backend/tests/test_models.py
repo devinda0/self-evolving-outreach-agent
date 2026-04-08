@@ -23,6 +23,7 @@ NOW = datetime.now(tz=timezone.utc)
 # CampaignState
 # ---------------------------------------------------------------------------
 
+
 def test_campaign_state_instantiation():
     state: CampaignState = {
         "session_id": "sess-001",
@@ -76,6 +77,7 @@ def test_campaign_state_instantiation():
 # ResearchFinding
 # ---------------------------------------------------------------------------
 
+
 def test_research_finding_instantiation():
     finding = ResearchFinding(
         id="rf-001",
@@ -116,6 +118,7 @@ def test_research_finding_json_round_trip():
 # ---------------------------------------------------------------------------
 # ContentVariant
 # ---------------------------------------------------------------------------
+
 
 def test_content_variant_instantiation():
     variant = ContentVariant(
@@ -159,6 +162,7 @@ def test_content_variant_json_round_trip():
 # DeploymentRecord
 # ---------------------------------------------------------------------------
 
+
 def test_deployment_record_instantiation():
     record = DeploymentRecord(
         id="dr-001",
@@ -199,6 +203,7 @@ def test_deployment_record_json_round_trip():
 # ---------------------------------------------------------------------------
 # NormalizedFeedbackEvent
 # ---------------------------------------------------------------------------
+
 
 def test_normalized_feedback_event_instantiation():
     event = NormalizedFeedbackEvent(
@@ -244,6 +249,7 @@ def test_normalized_feedback_event_json_round_trip():
 # IntelligenceEntry
 # ---------------------------------------------------------------------------
 
+
 def test_intelligence_entry_instantiation():
     entry = IntelligenceEntry(
         id="ie-001",
@@ -278,6 +284,7 @@ def test_intelligence_entry_json_round_trip():
 # ---------------------------------------------------------------------------
 # Prospect
 # ---------------------------------------------------------------------------
+
 
 def test_prospect_instantiation():
     prospect = Prospect(
@@ -319,6 +326,7 @@ def test_prospect_json_round_trip():
 # Segment
 # ---------------------------------------------------------------------------
 
+
 def test_segment_instantiation():
     segment = Segment(
         id="seg-001",
@@ -348,6 +356,7 @@ def test_segment_json_round_trip():
 # ---------------------------------------------------------------------------
 # UIAction & UIFrame
 # ---------------------------------------------------------------------------
+
 
 def test_ui_action_instantiation():
     action = UIAction(
@@ -394,6 +403,7 @@ def test_ui_frame_json_round_trip():
 # ---------------------------------------------------------------------------
 # ResearchPolicy
 # ---------------------------------------------------------------------------
+
 
 def test_research_policy_instantiation():
     policy: ResearchPolicy = {

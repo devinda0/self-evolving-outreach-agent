@@ -32,6 +32,7 @@ from app.agents.research.thread import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_state(**overrides) -> dict:
     base = {
         "session_id": "test-session",
@@ -97,6 +98,7 @@ def _make_search_results(n: int = 3) -> list[dict]:
 # Query generation
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateQueries:
     async def test_mock_mode_returns_fallback_queries(self):
         with patch("app.agents.research.thread._get_llm", return_value=None):
@@ -117,11 +119,10 @@ class TestGenerateQueries:
 # Thread synthesis
 # ---------------------------------------------------------------------------
 
+
 class TestSynthesizeThreadFindings:
     async def test_empty_results_returns_empty(self):
-        findings = await synthesize_thread_findings(
-            "competitor", "Prod", "Market", raw_results=[]
-        )
+        findings = await synthesize_thread_findings("competitor", "Prod", "Market", raw_results=[])
         assert findings == []
 
     async def test_mock_mode_returns_structured_findings(self):
@@ -141,13 +142,22 @@ class TestSynthesizeThreadFindings:
 # Research thread node
 # ---------------------------------------------------------------------------
 
+
 class TestResearchThreadNode:
     async def test_returns_findings_with_metadata(self):
         mock_results = _make_search_results(3)
         with (
             patch("app.agents.research.thread._get_llm", return_value=None),
-            patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
-            patch("app.agents.research.thread.extract_page", new_callable=AsyncMock, return_value="text"),
+            patch(
+                "app.agents.research.thread.search_web",
+                new_callable=AsyncMock,
+                return_value=mock_results,
+            ),
+            patch(
+                "app.agents.research.thread.extract_page",
+                new_callable=AsyncMock,
+                return_value="text",
+            ),
         ):
             state = _make_state(thread_type="competitor")
             result = await research_thread_node(state)
@@ -178,7 +188,11 @@ class TestResearchThreadNode:
 
         with (
             patch("app.agents.research.thread._get_llm", return_value=None),
-            patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
+            patch(
+                "app.agents.research.thread.search_web",
+                new_callable=AsyncMock,
+                return_value=mock_results,
+            ),
             patch("app.agents.research.thread.extract_page", extract_mock),
         ):
             state = _make_state(thread_type="market", research_policy=policy)
@@ -206,17 +220,28 @@ class TestResearchThreadNode:
         for thread_type in ["competitor", "audience", "channel", "market"]:
             with (
                 patch("app.agents.research.thread._get_llm", return_value=None),
-                patch("app.agents.research.thread.search_web", new_callable=AsyncMock, return_value=mock_results),
-                patch("app.agents.research.thread.extract_page", new_callable=AsyncMock, return_value=""),
+                patch(
+                    "app.agents.research.thread.search_web",
+                    new_callable=AsyncMock,
+                    return_value=mock_results,
+                ),
+                patch(
+                    "app.agents.research.thread.extract_page",
+                    new_callable=AsyncMock,
+                    return_value="",
+                ),
             ):
                 state = _make_state(thread_type=thread_type)
                 result = await research_thread_node(state)
-            assert len(result["research_findings"]) >= 2, f"{thread_type} thread returned < 2 findings"
+            assert len(result["research_findings"]) >= 2, (
+                f"{thread_type} thread returned < 2 findings"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Research dispatcher
 # ---------------------------------------------------------------------------
+
 
 class TestResearchDispatcher:
     async def test_returns_default_threads(self):
@@ -241,6 +266,7 @@ class TestResearchDispatcher:
 # ---------------------------------------------------------------------------
 # Synthesizer
 # ---------------------------------------------------------------------------
+
 
 class TestResearchSynthesizer:
     async def test_produces_briefing_and_ui_frame(self):
@@ -319,6 +345,7 @@ class TestResearchSynthesizer:
 # Deduplication
 # ---------------------------------------------------------------------------
 
+
 class TestDeduplication:
     def test_keeps_highest_confidence(self):
         findings = [
@@ -339,6 +366,7 @@ class TestDeduplication:
 # Bounded branching
 # ---------------------------------------------------------------------------
 
+
 class TestBoundedBranching:
     def test_should_branch_when_all_conditions_met(self):
         lead = {"confidence": 0.8, "branch_type": "search_discovery"}
@@ -351,28 +379,45 @@ class TestBoundedBranching:
 
     def test_rejects_low_confidence(self):
         lead = {"confidence": 0.4, "branch_type": "search_discovery"}
-        policy = {"evidence_threshold": 0.6, "allowed_tool_groups": ["search_discovery"], "max_branch_depth": 3}
+        policy = {
+            "evidence_threshold": 0.6,
+            "allowed_tool_groups": ["search_discovery"],
+            "max_branch_depth": 3,
+        }
         assert should_branch(lead, policy, current_depth=0) is False
 
     def test_rejects_disallowed_tool_group(self):
         lead = {"confidence": 0.8, "branch_type": "news_events"}
-        policy = {"evidence_threshold": 0.6, "allowed_tool_groups": ["search_discovery"], "max_branch_depth": 3}
+        policy = {
+            "evidence_threshold": 0.6,
+            "allowed_tool_groups": ["search_discovery"],
+            "max_branch_depth": 3,
+        }
         assert should_branch(lead, policy, current_depth=0) is False
 
     def test_rejects_exceeded_depth(self):
         lead = {"confidence": 0.9, "branch_type": "search_discovery"}
-        policy = {"evidence_threshold": 0.6, "allowed_tool_groups": ["search_discovery"], "max_branch_depth": 2}
+        policy = {
+            "evidence_threshold": 0.6,
+            "allowed_tool_groups": ["search_discovery"],
+            "max_branch_depth": 2,
+        }
         assert should_branch(lead, policy, current_depth=2) is False
 
     def test_rejects_at_exact_depth_limit(self):
         lead = {"confidence": 0.9, "branch_type": "search_discovery"}
-        policy = {"evidence_threshold": 0.6, "allowed_tool_groups": ["search_discovery"], "max_branch_depth": 1}
+        policy = {
+            "evidence_threshold": 0.6,
+            "allowed_tool_groups": ["search_discovery"],
+            "max_branch_depth": 1,
+        }
         assert should_branch(lead, policy, current_depth=1) is False
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class TestHelpers:
     def test_normalize_finding_clamps_confidence(self):
@@ -397,8 +442,18 @@ class TestHelpers:
 
     def test_mock_briefing_structure(self):
         findings = [
-            {"claim": "A", "confidence": 0.8, "thread_type": "competitor", "actionable_implication": "act"},
-            {"claim": "B", "confidence": 0.7, "thread_type": "audience", "actionable_implication": "act2"},
+            {
+                "claim": "A",
+                "confidence": 0.8,
+                "thread_type": "competitor",
+                "actionable_implication": "act",
+            },
+            {
+                "claim": "B",
+                "confidence": 0.7,
+                "thread_type": "audience",
+                "actionable_implication": "act2",
+            },
         ]
         briefing = _mock_briefing(findings)
         assert "executive_summary" in briefing

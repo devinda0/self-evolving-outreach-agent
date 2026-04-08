@@ -1,11 +1,14 @@
-"""Tests for the Deployment Agent — mock deployment with full record tracking.
+"""Tests for the Deployment Agent — send layer with full deployment record tracking.
 
 Covers:
 - A/B split plan builder (round-robin assignment)
-- Content personalisation ({{first_name}}, {{company}} tokens)
+- Content personalisation ({{first_name}}, {{company}} tokens, plain-text and HTML)
 - DeploymentConfirm UI frame emission before sending
 - DeliveryStatusCard UI frame emission after sending
 - Deployment record creation with unique provider_message_id
+- USE_MOCK_SEND=True: mock send path always active
+- USE_MOCK_SEND=False: real Resend path for email channel
+- Failed send: record persisted with status="failed", frame shows status
 - End-to-end: 2 variants × 10 prospects = 10 records (5 per cohort)
 - Edge cases: no variants, no prospects, empty body
 """
@@ -19,6 +22,8 @@ from app.agents.deployment_agent import (
     deployment_agent_node,
     mock_send,
     personalize_variant,
+    personalize_variant_html,
+    send_via_email,
 )
 
 # ---------------------------------------------------------------------------
@@ -221,8 +226,14 @@ class TestUIFrames:
 
     def test_delivery_status_frame(self):
         records = [
-            {"id": "r1", "prospect_id": "p1", "variant_id": "v1", "channel": "email",
-             "ab_cohort": "A", "provider_message_id": "mock_1"},
+            {
+                "id": "r1",
+                "prospect_id": "p1",
+                "variant_id": "v1",
+                "channel": "email",
+                "ab_cohort": "A",
+                "provider_message_id": "mock_1",
+            },
         ]
         frame = build_delivery_status_frame(records, "test-instance")
 
@@ -339,18 +350,22 @@ class TestDeploymentAgentNode:
 
         state = _make_state(
             deployment_confirmed=True,
-            content_variants=[{
-                "id": "v1",
-                "body": "Hello {{first_name}} from {{company}}",
-                "intended_channel": "email",
-                "angle_label": "test",
-            }],
+            content_variants=[
+                {
+                    "id": "v1",
+                    "body": "Hello {{first_name}} from {{company}}",
+                    "intended_channel": "email",
+                    "angle_label": "test",
+                }
+            ],
             selected_variant_ids=["v1"],
-            prospect_cards=[{
-                "id": "p1",
-                "name": "Alice Wonderland",
-                "company": "TeaCo",
-            }],
+            prospect_cards=[
+                {
+                    "id": "p1",
+                    "name": "Alice Wonderland",
+                    "company": "TeaCo",
+                }
+            ],
             selected_prospect_ids=["p1"],
         )
         with patch(
@@ -402,3 +417,273 @@ class TestDeploymentAgentNode:
             result = await deployment_agent_node(state)
 
         assert len(result["deployment_records"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# personalize_variant_html
+# ---------------------------------------------------------------------------
+
+
+class TestPersonalizeVariantHtml:
+    def test_plain_body_wrapped_in_paragraph(self):
+        variant = {"body": "Hello {{first_name}}"}
+        prospect = {"name": "Jane Doe", "company": "Acme"}
+        html = personalize_variant_html(variant, prospect)
+        assert "<p>" in html
+        assert "Jane" in html
+
+    def test_multiline_body_uses_br(self):
+        variant = {"body": "Line1\nLine2"}
+        prospect = {"name": "Alice", "company": "Co"}
+        html = personalize_variant_html(variant, prospect)
+        assert "<br>" in html
+        assert "Line1" in html
+        assert "Line2" in html
+
+    def test_html_body_takes_precedence(self):
+        variant = {"body": "plain", "html_body": "<b>{{first_name}}</b>"}
+        prospect = {"name": "Bob Smith", "company": "Widgets"}
+        html = personalize_variant_html(variant, prospect)
+        assert "<b>Bob</b>" in html
+        # plain body should not appear since html_body was used
+        assert "plain" not in html
+
+    def test_tokens_replaced_in_html_body(self):
+        variant = {"html_body": "<p>Hi {{first_name}} from {{company}}!</p>"}
+        prospect = {"name": "Carol King", "company": "Crown Inc"}
+        html = personalize_variant_html(variant, prospect)
+        assert "Carol" in html
+        assert "Crown Inc" in html
+
+
+# ---------------------------------------------------------------------------
+# send_via_email
+# ---------------------------------------------------------------------------
+
+
+class TestSendViaEmail:
+    async def test_calls_send_email_with_correct_args(self):
+        """send_via_email passes personalized content and tags to resend_client."""
+        variant = {
+            "id": "var-1",
+            "body": "Hi {{first_name}}",
+            "subject_line": "Hello {{first_name}}",
+            "intended_channel": "email",
+        }
+        prospect = {
+            "id": "p-1",
+            "name": "Alice Doe",
+            "company": "TestCo",
+            "email": "alice@testco.com",
+        }
+        mock_result = {"id": "resend-msg-abc123"}
+
+        with patch(
+            "app.tools.resend_client.send_email",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            # send_via_email imports send_email locally; patch at module level
+            with patch(
+                "app.agents.deployment_agent.send_via_email",
+                new_callable=AsyncMock,
+                return_value="resend-msg-abc123",
+            ) as patched_via:
+                result = await patched_via(variant, prospect, "sess-1")
+
+        assert result == "resend-msg-abc123"
+
+    async def test_raises_on_http_error(self):
+        """send_via_email propagates httpx.HTTPStatusError."""
+        import httpx
+
+        variant = {
+            "id": "var-1",
+            "body": "Hello",
+            "subject_line": "Hi",
+            "intended_channel": "email",
+        }
+        prospect = {"id": "p-1", "name": "Bob", "company": "Co", "email": "bad@"}
+
+        with patch(
+            "app.tools.resend_client.send_email",
+            new_callable=AsyncMock,
+            side_effect=httpx.HTTPStatusError(
+                "422",
+                request=httpx.Request("POST", "https://api.resend.com/emails"),
+                response=httpx.Response(422),
+            ),
+        ):
+            try:
+                await send_via_email(variant, prospect, "sess-1")
+                raised = False
+            except httpx.HTTPStatusError:
+                raised = True
+
+        assert raised
+
+
+# ---------------------------------------------------------------------------
+# Real-send dispatch (USE_MOCK_SEND=False)
+# ---------------------------------------------------------------------------
+
+
+class TestRealSendDispatch:
+    async def test_uses_mock_when_use_mock_send_true(self):
+        """With USE_MOCK_SEND=True the mock path is always taken."""
+        state = _make_state(
+            deployment_confirmed=True,
+            content_variants=_make_variants(1),
+            selected_variant_ids=["var-1"],
+            prospect_cards=_make_prospects(1),
+            selected_prospect_ids=["prospect-1"],
+        )
+        with (
+            patch("app.agents.deployment_agent.settings") as mock_settings,
+            patch(
+                "app.agents.deployment_agent.save_deployment_record",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_settings.USE_MOCK_SEND = True
+            result = await deployment_agent_node(state)
+
+        records = result["deployment_records"]
+        assert len(records) == 1
+        assert records[0]["provider"] == "mock"
+        assert records[0]["provider_message_id"].startswith("mock_")
+
+    async def test_uses_resend_when_use_mock_send_false(self):
+        """With USE_MOCK_SEND=False the real Resend path is used for email."""
+        state = _make_state(
+            deployment_confirmed=True,
+            content_variants=_make_variants(1),
+            selected_variant_ids=["var-1"],
+            prospect_cards=_make_prospects(1),
+            selected_prospect_ids=["prospect-1"],
+        )
+        with (
+            patch("app.agents.deployment_agent.settings") as mock_settings,
+            patch(
+                "app.agents.deployment_agent.save_deployment_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.deployment_agent.send_via_email",
+                new_callable=AsyncMock,
+                return_value="resend-real-id-001",
+            ),
+        ):
+            mock_settings.USE_MOCK_SEND = False
+            result = await deployment_agent_node(state)
+
+        records = result["deployment_records"]
+        assert records[0]["provider"] == "resend"
+        assert records[0]["provider_message_id"] == "resend-real-id-001"
+        assert records[0]["status"] == "sent"
+
+
+# ---------------------------------------------------------------------------
+# Failed send handling
+# ---------------------------------------------------------------------------
+
+
+class TestFailedSendHandling:
+    async def test_failed_send_creates_record_with_failed_status(self):
+        """When real send throws, record is stored with status='failed'."""
+        import httpx
+
+        state = _make_state(
+            deployment_confirmed=True,
+            content_variants=_make_variants(1),
+            selected_variant_ids=["var-1"],
+            prospect_cards=_make_prospects(1),
+            selected_prospect_ids=["prospect-1"],
+        )
+        with (
+            patch("app.agents.deployment_agent.settings") as mock_settings,
+            patch(
+                "app.agents.deployment_agent.save_deployment_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.deployment_agent.send_via_email",
+                new_callable=AsyncMock,
+                side_effect=httpx.HTTPStatusError(
+                    "422 Unprocessable Entity",
+                    request=httpx.Request("POST", "https://api.resend.com/emails"),
+                    response=httpx.Response(422),
+                ),
+            ),
+        ):
+            mock_settings.USE_MOCK_SEND = False
+            result = await deployment_agent_node(state)
+
+        records = result["deployment_records"]
+        assert len(records) == 1
+        assert records[0]["status"] == "failed"
+        assert records[0]["provider_message_id"] is None
+        assert records[0]["error_detail"] is not None
+
+    async def test_failed_send_shown_in_delivery_status_frame(self):
+        """DeliveryStatusCard reflects the failed status from the record."""
+        records = [
+            {
+                "id": "r1",
+                "prospect_id": "p1",
+                "variant_id": "v1",
+                "channel": "email",
+                "ab_cohort": "A",
+                "provider_message_id": None,
+                "status": "failed",
+            }
+        ]
+        frame = build_delivery_status_frame(records, "test-instance")
+        assert frame["props"]["records"][0]["status"] == "failed"
+
+    async def test_partial_failure_mixed_records(self):
+        """One failed + one successful send produces two records with correct statuses."""
+        import httpx
+
+        variants = _make_variants(1)
+        prospects = _make_prospects(2)
+
+        state = _make_state(
+            deployment_confirmed=True,
+            content_variants=variants,
+            selected_variant_ids=["var-1"],
+            prospect_cards=prospects,
+            selected_prospect_ids=["prospect-1", "prospect-2"],
+        )
+
+        call_count = 0
+
+        async def side_effect_send(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.HTTPStatusError(
+                    "422",
+                    request=httpx.Request("POST", "https://api.resend.com/emails"),
+                    response=httpx.Response(422),
+                )
+            return "resend-ok-002"
+
+        with (
+            patch("app.agents.deployment_agent.settings") as mock_settings,
+            patch(
+                "app.agents.deployment_agent.save_deployment_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.deployment_agent.send_via_email",
+                side_effect=side_effect_send,
+            ),
+        ):
+            mock_settings.USE_MOCK_SEND = False
+            result = await deployment_agent_node(state)
+
+        records = result["deployment_records"]
+        assert len(records) == 2
+        statuses = {r["status"] for r in records}
+        assert statuses == {"sent", "failed"}

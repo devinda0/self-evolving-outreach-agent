@@ -48,6 +48,8 @@ class DeploymentRecord(BaseModel):
     ab_cohort: str
     rendered_content_hash: str
     sent_at: datetime
+    status: Literal["sent", "failed"] = "sent"
+    error_detail: Optional[str] = None
 
 
 class NormalizedFeedbackEvent(BaseModel):

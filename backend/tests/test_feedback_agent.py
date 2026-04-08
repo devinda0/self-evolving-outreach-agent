@@ -31,6 +31,7 @@ from app.agents.feedback_agent import (
 # Test helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_state(**overrides) -> dict:
     """Build a minimal CampaignState dict with sensible defaults."""
     base = {
@@ -137,6 +138,7 @@ def _make_finding(finding_id: str, confidence: float = 0.6) -> dict:
 # aggregate_engagement_results
 # ---------------------------------------------------------------------------
 
+
 class TestAggregateEngagementResults:
     def test_single_variant_all_event_types(self):
         records = _make_records(10, "var-A")
@@ -161,10 +163,9 @@ class TestAggregateEngagementResults:
     def test_two_variants_correct_attribution(self):
         records_a = _make_records(5, "var-A")
         records_b = _make_records(5, "var-B")
-        events = (
-            [_make_event("var-A", "open") for _ in range(3)]
-            + [_make_event("var-B", "reply") for _ in range(2)]
-        )
+        events = [_make_event("var-A", "open") for _ in range(3)] + [
+            _make_event("var-B", "reply") for _ in range(2)
+        ]
         results = aggregate_engagement_results(events, records_a + records_b)
         by_id = {r["variant_id"]: r for r in results}
         assert by_id["var-A"]["open_rate"] == pytest.approx(0.6, abs=0.001)
@@ -198,10 +199,9 @@ class TestAggregateEngagementResults:
         """Acceptance criterion: 10 deployment records + 6 open events (3 per variant)."""
         records_a = _make_records(5, "var-A")
         records_b = _make_records(5, "var-B")
-        events = (
-            [_make_event("var-A", "open") for _ in range(3)]
-            + [_make_event("var-B", "open") for _ in range(3)]
-        )
+        events = [_make_event("var-A", "open") for _ in range(3)] + [
+            _make_event("var-B", "open") for _ in range(3)
+        ]
         results = aggregate_engagement_results(events, records_a + records_b)
         by_id = {r["variant_id"]: r for r in results}
         assert by_id["var-A"]["opens"] == 3
@@ -213,6 +213,7 @@ class TestAggregateEngagementResults:
 # ---------------------------------------------------------------------------
 # determine_winner
 # ---------------------------------------------------------------------------
+
 
 class TestDetermineWinner:
     def test_returns_highest_reply_rate(self):
@@ -254,6 +255,7 @@ class TestDetermineWinner:
 # ---------------------------------------------------------------------------
 # compute_confidence_updates
 # ---------------------------------------------------------------------------
+
 
 class TestComputeConfidenceUpdates:
     def test_positive_reply_rate_increases_confidence(self):
@@ -304,6 +306,7 @@ class TestComputeConfidenceUpdates:
 # summarize_learning
 # ---------------------------------------------------------------------------
 
+
 class TestSummarizeLearning:
     def test_includes_winner_info(self):
         results = [
@@ -327,6 +330,7 @@ class TestSummarizeLearning:
 # ---------------------------------------------------------------------------
 # UI frame builders
 # ---------------------------------------------------------------------------
+
 
 class TestUIFrameBuilders:
     def test_ab_results_frame_structure(self):
@@ -358,6 +362,7 @@ class TestUIFrameBuilders:
 # ---------------------------------------------------------------------------
 # feedback_agent_node — integration-style (all DB calls mocked)
 # ---------------------------------------------------------------------------
+
 
 class TestFeedbackAgentNode:
     @pytest.mark.asyncio

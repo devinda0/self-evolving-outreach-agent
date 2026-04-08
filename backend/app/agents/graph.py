@@ -75,10 +75,7 @@ def research_fan_out(state: CampaignState) -> list[Send]:
     thread_types = state.get("active_thread_types", [])
     if not thread_types:
         thread_types = ["competitor", "audience", "channel", "market"]
-    return [
-        Send("research_thread", {**state, "thread_type": t})
-        for t in thread_types
-    ]
+    return [Send("research_thread", {**state, "thread_type": t}) for t in thread_types]
 
 
 # ---------------------------------------------------------------------------

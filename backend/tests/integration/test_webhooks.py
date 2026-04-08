@@ -7,6 +7,7 @@ Covers:
 - Deduplication: sending same event twice results in only one record
 - GET /campaign/{session_id}/feedback-events returns all events for that session
 - POST /webhook/unipile normalizes LinkedIn DM events
+- HMAC signature verification: valid signature passes, invalid is rejected with 401
 """
 
 import pytest
@@ -284,3 +285,134 @@ async def test_generic_engagement_webhook():
     assert event is not None
     assert event["event_type"] == "reply"
     assert event["deployment_record_id"] == "deploy-001"
+
+
+# ---------------------------------------------------------------------------
+# HMAC signature verification — unit-level (no MongoDB required)
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyResendSignature:
+    """Unit tests for the HMAC svix signature verification helper."""
+
+    def _make_signature(
+        self,
+        svix_id: str,
+        svix_timestamp: str,
+        body: bytes,
+        secret: str,
+    ) -> str:
+        import base64
+        import hashlib
+        import hmac as _hmac
+
+        secret_bytes = base64.b64decode(secret.removeprefix("whsec_"))
+        signed_content = f"{svix_id}.{svix_timestamp}.{body.decode()}"
+        sig = base64.b64encode(
+            _hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
+        ).decode()
+        return f"v1,{sig}"
+
+    def test_valid_signature_passes(self):
+        import time
+
+        from app.api.webhooks import _verify_resend_signature
+
+        secret = "whsec_" + __import__("base64").b64encode(b"test-secret").decode()
+        body = b'{"type": "email.opened"}'
+        svix_id = "msg_001"
+        svix_ts = str(int(time.time()))
+        sig = self._make_signature(svix_id, svix_ts, body, secret)
+
+        assert _verify_resend_signature(body, svix_id, svix_ts, sig, secret) is True
+
+    def test_invalid_signature_fails(self):
+        import time
+
+        from app.api.webhooks import _verify_resend_signature
+
+        secret = "whsec_" + __import__("base64").b64encode(b"test-secret").decode()
+        body = b'{"type": "email.opened"}'
+        svix_id = "msg_001"
+        svix_ts = str(int(time.time()))
+
+        assert _verify_resend_signature(body, svix_id, svix_ts, "v1,invalidsig", secret) is False
+
+    def test_stale_timestamp_fails(self):
+        from app.api.webhooks import _verify_resend_signature
+
+        secret = "whsec_" + __import__("base64").b64encode(b"test-secret").decode()
+        body = b'{"type": "email.opened"}'
+        svix_id = "msg_001"
+        stale_ts = "1000000000"  # way in the past
+        sig = self._make_signature(svix_id, stale_ts, body, secret)
+
+        assert _verify_resend_signature(body, svix_id, stale_ts, sig, secret) is False
+
+
+@pytest.mark.integration
+async def test_resend_webhook_rejects_invalid_signature():
+    """When RESEND_WEBHOOK_SECRET is set, invalid signatures are rejected with 401."""
+    import time
+    from unittest.mock import patch
+
+    secret = "whsec_" + __import__("base64").b64encode(b"test-secret").decode()
+
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.RESEND_WEBHOOK_SECRET = secret
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/webhook/resend",
+                content=b'{"type": "email.opened", "data": {}}',
+                headers={
+                    "Content-Type": "application/json",
+                    "svix-id": "msg_test",
+                    "svix-timestamp": str(int(time.time())),
+                    "svix-signature": "v1,badsignature",
+                },
+            )
+
+    assert resp.status_code == 401
+
+
+@pytest.mark.integration
+async def test_resend_webhook_accepts_valid_signature():
+    """When RESEND_WEBHOOK_SECRET is set, valid svix signatures are accepted."""
+    import base64
+    import hashlib
+    import hmac as _hmac
+    import time
+    from unittest.mock import patch
+
+    secret = "whsec_" + base64.b64encode(b"test-secret").decode()
+    body = b'{"type": "email.opened", "data": {"message_id": "msg-hmac-001", "email_id": "evt-hmac-001"}}'
+    svix_id = "msg_hmac_test"
+    svix_ts = str(int(time.time()))
+
+    # Build a valid signature
+    secret_bytes = base64.b64decode(secret.removeprefix("whsec_"))
+    signed_content = f"{svix_id}.{svix_ts}.{body.decode()}"
+    sig = base64.b64encode(
+        _hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
+    ).decode()
+    svix_sig = f"v1,{sig}"
+
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.RESEND_WEBHOOK_SECRET = secret
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/webhook/resend",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "svix-id": svix_id,
+                    "svix-timestamp": svix_ts,
+                    "svix-signature": svix_sig,
+                },
+            )
+
+    assert resp.status_code == 200

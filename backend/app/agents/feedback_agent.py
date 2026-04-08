@@ -73,10 +73,7 @@ def aggregate_engagement_results(
         if v_id:
             by_variant[v_id]["sent"] += 1
 
-    return [
-        {"variant_id": k, **_compute_rates(v)}
-        for k, v in by_variant.items()
-    ]
+    return [{"variant_id": k, **_compute_rates(v)} for k, v in by_variant.items()]
 
 
 def _compute_rates(counts: dict) -> dict:
@@ -158,18 +155,14 @@ def compute_confidence_updates(
         # We can't directly know which variant cited this finding unless we look in
         # content_variants. To keep the feedback agent self-contained, we apply a
         # global average across all qualified results as a conservative update.
-        finding_refs[finding_id] = [
-            r for r in results if r.get("sent", 0) >= MIN_SAMPLE_SIZE
-        ]
+        finding_refs[finding_id] = [r for r in results if r.get("sent", 0) >= MIN_SAMPLE_SIZE]
 
     updates: list[tuple[str, float]] = []
     for finding_id, variant_results in finding_refs.items():
         if not variant_results:
             continue
 
-        avg_reply = sum(r.get("reply_rate", 0.0) for r in variant_results) / len(
-            variant_results
-        )
+        avg_reply = sum(r.get("reply_rate", 0.0) for r in variant_results) / len(variant_results)
         avg_sent = sum(r.get("sent", 0) for r in variant_results) / len(variant_results)
 
         # Scale factor: more sends → more trust in the signal (capped at 1.0)
@@ -242,7 +235,9 @@ async def _quarantine_unmatched_events(
                 event.get("provider_event_id"),
                 event.get("dedupe_key"),
             )
-            await save_quarantine_event({**event, "quarantine_reason": "no_matching_deployment_record"})
+            await save_quarantine_event(
+                {**event, "quarantine_reason": "no_matching_deployment_record"}
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -396,9 +391,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         for finding_id, delta in updates:
             await update_finding_confidence(finding_id, delta)
             confidence_updates.append({"finding_id": finding_id, "delta": delta})
-        logger.info(
-            "feedback_agent_node: persisted %d confidence updates", len(confidence_updates)
-        )
+        logger.info("feedback_agent_node: persisted %d confidence updates", len(confidence_updates))
     except Exception as exc:
         logger.error("feedback_agent_node: confidence update step failed: %s", exc)
 

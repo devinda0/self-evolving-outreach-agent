@@ -31,6 +31,7 @@ router = APIRouter(tags=["prospects"])
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+
 class SelectSegmentRequest(BaseModel):
     segment_id: str
 
@@ -38,6 +39,7 @@ class SelectSegmentRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/campaign/{session_id}/prospects/import")
 async def import_prospects(session_id: str, file: UploadFile) -> dict[str, Any]:

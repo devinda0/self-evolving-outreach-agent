@@ -27,6 +27,7 @@ async def _setup_teardown():
 
     # Reset the graph so checkpointer is rebuilt with the current db handle.
     import app.api.campaign as campaign_module
+
     campaign_module.reset_graph()
 
     yield

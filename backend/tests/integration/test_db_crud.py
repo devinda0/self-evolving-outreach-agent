@@ -44,6 +44,7 @@ async def _setup_teardown():
 # Campaign state round-trip
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_campaign_state_round_trip():
     state = {
@@ -91,6 +92,7 @@ async def test_load_nonexistent_session():
 # Research findings
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_save_and_get_top_findings():
     findings = [
@@ -125,6 +127,7 @@ async def test_get_top_findings_with_min_confidence():
 # Content variants
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 async def test_save_and_get_variants():
     variant = {"session_id": "sess-cv", "variant_id": "v1", "body": "Hello"}
@@ -138,6 +141,7 @@ async def test_save_and_get_variants():
 # ---------------------------------------------------------------------------
 # Deployment records
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_save_and_lookup_deployment_record():
@@ -160,6 +164,7 @@ async def test_save_and_lookup_deployment_record():
 # ---------------------------------------------------------------------------
 # Feedback and quarantine
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_save_feedback_event():
@@ -187,6 +192,7 @@ async def test_save_quarantine_event():
 # ---------------------------------------------------------------------------
 # Tool cache
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 async def test_cache_tool_result_and_retrieve():

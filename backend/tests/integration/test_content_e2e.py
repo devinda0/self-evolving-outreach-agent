@@ -56,6 +56,7 @@ async def _setup_teardown():
 # Shared test data
 # ---------------------------------------------------------------------------
 
+
 def _research_findings(session_id: str = "") -> list[dict]:
     """Realistic research findings as they'd come from the research subgraph."""
     return [
@@ -189,15 +190,36 @@ def _make_state(session_id: str, **overrides) -> dict:
         "selected_prospect_ids": ["prospect-001", "prospect-002", "prospect-003"],
         "prospect_pool_ref": None,
         "prospect_cards": [
-            {"id": "prospect-001", "name": "Alice Chen", "title": "VP Sales", "company": "Acme SaaS",
-             "fit_score": 0.85, "urgency_score": 0.70, "angle_recommendation": "pipeline-acceleration",
-             "channel_recommendation": "email"},
-            {"id": "prospect-002", "name": "Bob Martinez", "title": "Head of Growth", "company": "ScaleUp Inc",
-             "fit_score": 0.80, "urgency_score": 0.65, "angle_recommendation": "demand-generation",
-             "channel_recommendation": "linkedin"},
-            {"id": "prospect-003", "name": "Carol Nguyen", "title": "CRO", "company": "CloudFirst",
-             "fit_score": 0.75, "urgency_score": 0.72, "angle_recommendation": "pipeline-acceleration",
-             "channel_recommendation": "email"},
+            {
+                "id": "prospect-001",
+                "name": "Alice Chen",
+                "title": "VP Sales",
+                "company": "Acme SaaS",
+                "fit_score": 0.85,
+                "urgency_score": 0.70,
+                "angle_recommendation": "pipeline-acceleration",
+                "channel_recommendation": "email",
+            },
+            {
+                "id": "prospect-002",
+                "name": "Bob Martinez",
+                "title": "Head of Growth",
+                "company": "ScaleUp Inc",
+                "fit_score": 0.80,
+                "urgency_score": 0.65,
+                "angle_recommendation": "demand-generation",
+                "channel_recommendation": "linkedin",
+            },
+            {
+                "id": "prospect-003",
+                "name": "Carol Nguyen",
+                "title": "CRO",
+                "company": "CloudFirst",
+                "fit_score": 0.75,
+                "urgency_score": 0.72,
+                "angle_recommendation": "pipeline-acceleration",
+                "channel_recommendation": "email",
+            },
         ],
         "content_request": None,
         "content_variants": [],
@@ -281,9 +303,7 @@ async def test_content_agent_e2e_real_gemini():
     assert all(h for h in hypotheses), "All variants must have non-null hypotheses"
     # Check that hypotheses are actually different (at least first 20 chars differ)
     hypothesis_prefixes = {h[:20].lower() for h in hypotheses}
-    assert len(hypothesis_prefixes) >= 2, (
-        f"Hypotheses should be distinct, got: {hypotheses}"
-    )
+    assert len(hypothesis_prefixes) >= 2, f"Hypotheses should be distinct, got: {hypotheses}"
 
     # 8. Verify required fields per variant
     for v in variants:
@@ -292,8 +312,8 @@ async def test_content_agent_e2e_real_gemini():
         assert v["cycle_number"] == 1
         assert v["target_segment_id"] == "seg-primary"
         assert v["success_metric"]  # non-empty
-        assert v["body"]            # non-empty
-        assert v["cta"]             # non-empty
+        assert v["body"]  # non-empty
+        assert v["cta"]  # non-empty
         assert v.get("angle_label")  # should be present
 
     # 9. Verify email variants have subject lines, linkedin does not
@@ -347,7 +367,8 @@ async def test_content_agent_with_content_request():
 
     # At least one variant should reference the audience finding about data quality
     data_quality_refs = [
-        v for v in variants
+        v
+        for v in variants
         if "rf-002" in v["source_finding_ids"] or "rf-005" in v["source_finding_ids"]
     ]
     assert len(data_quality_refs) >= 1, (

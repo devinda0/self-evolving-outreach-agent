@@ -28,22 +28,83 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEMO_SEED_PROSPECTS: list[dict[str, Any]] = [
-    {"name": "Alice Chen", "title": "VP Sales", "company": "Acme SaaS", "email": "alice@acme.io", "linkedin_url": "https://linkedin.com/in/alicechen"},
-    {"name": "Bob Martinez", "title": "Head of Growth", "company": "ScaleUp Inc", "email": "bob@scaleup.io", "linkedin_url": "https://linkedin.com/in/bobmartinez"},
-    {"name": "Carol Nguyen", "title": "CRO", "company": "CloudFirst", "email": "carol@cloudfirst.com", "linkedin_url": "https://linkedin.com/in/carolnguyen"},
-    {"name": "David Kim", "title": "VP Marketing", "company": "DataDriven Co", "email": "david@datadriven.co", "linkedin_url": "https://linkedin.com/in/davidkim"},
-    {"name": "Emily Ross", "title": "Director of Partnerships", "company": "NexGen Labs", "email": "emily@nexgenlabs.io", "linkedin_url": "https://linkedin.com/in/emilyross"},
-    {"name": "Frank Okafor", "title": "VP Business Development", "company": "Synapse AI", "email": "frank@synapseai.com", "linkedin_url": "https://linkedin.com/in/frankokafor"},
-    {"name": "Grace Liu", "title": "Head of Revenue", "company": "FinStack", "email": "grace@finstack.io", "linkedin_url": "https://linkedin.com/in/graceliu"},
-    {"name": "Hasan Ali", "title": "VP Sales", "company": "PipelineHQ", "email": "hasan@pipelinehq.com", "linkedin_url": "https://linkedin.com/in/hasanali"},
-    {"name": "Irene Volkov", "title": "Growth Lead", "company": "ShipFast Dev", "email": "irene@shipfast.dev", "linkedin_url": "https://linkedin.com/in/irenevolkov"},
-    {"name": "James Park", "title": "Director of Sales", "company": "OutboundOS", "email": "james@outboundos.io", "linkedin_url": "https://linkedin.com/in/jamespark"},
+    {
+        "name": "Alice Chen",
+        "title": "VP Sales",
+        "company": "Acme SaaS",
+        "email": "alice@acme.io",
+        "linkedin_url": "https://linkedin.com/in/alicechen",
+    },
+    {
+        "name": "Bob Martinez",
+        "title": "Head of Growth",
+        "company": "ScaleUp Inc",
+        "email": "bob@scaleup.io",
+        "linkedin_url": "https://linkedin.com/in/bobmartinez",
+    },
+    {
+        "name": "Carol Nguyen",
+        "title": "CRO",
+        "company": "CloudFirst",
+        "email": "carol@cloudfirst.com",
+        "linkedin_url": "https://linkedin.com/in/carolnguyen",
+    },
+    {
+        "name": "David Kim",
+        "title": "VP Marketing",
+        "company": "DataDriven Co",
+        "email": "david@datadriven.co",
+        "linkedin_url": "https://linkedin.com/in/davidkim",
+    },
+    {
+        "name": "Emily Ross",
+        "title": "Director of Partnerships",
+        "company": "NexGen Labs",
+        "email": "emily@nexgenlabs.io",
+        "linkedin_url": "https://linkedin.com/in/emilyross",
+    },
+    {
+        "name": "Frank Okafor",
+        "title": "VP Business Development",
+        "company": "Synapse AI",
+        "email": "frank@synapseai.com",
+        "linkedin_url": "https://linkedin.com/in/frankokafor",
+    },
+    {
+        "name": "Grace Liu",
+        "title": "Head of Revenue",
+        "company": "FinStack",
+        "email": "grace@finstack.io",
+        "linkedin_url": "https://linkedin.com/in/graceliu",
+    },
+    {
+        "name": "Hasan Ali",
+        "title": "VP Sales",
+        "company": "PipelineHQ",
+        "email": "hasan@pipelinehq.com",
+        "linkedin_url": "https://linkedin.com/in/hasanali",
+    },
+    {
+        "name": "Irene Volkov",
+        "title": "Growth Lead",
+        "company": "ShipFast Dev",
+        "email": "irene@shipfast.dev",
+        "linkedin_url": "https://linkedin.com/in/irenevolkov",
+    },
+    {
+        "name": "James Park",
+        "title": "Director of Sales",
+        "company": "OutboundOS",
+        "email": "james@outboundos.io",
+        "linkedin_url": "https://linkedin.com/in/jamespark",
+    },
 ]
 
 
 # ---------------------------------------------------------------------------
 # Prospect loading
 # ---------------------------------------------------------------------------
+
 
 async def load_prospects(prospect_pool_ref: str | None) -> list[dict[str, Any]]:
     """Load prospects from the referenced source, falling back to the demo seed list."""
@@ -73,13 +134,15 @@ async def load_prospects_from_csv(file_path: str) -> list[dict[str, Any]]:
     content = path.read_text(encoding="utf-8")
     reader = csv.DictReader(io.StringIO(content))
     for row in reader:
-        prospects.append({
-            "name": row.get("name", "").strip(),
-            "email": row.get("email", "").strip() or None,
-            "linkedin_url": row.get("linkedin_url", "").strip() or None,
-            "title": row.get("title", "").strip(),
-            "company": row.get("company", "").strip(),
-        })
+        prospects.append(
+            {
+                "name": row.get("name", "").strip(),
+                "email": row.get("email", "").strip() or None,
+                "linkedin_url": row.get("linkedin_url", "").strip() or None,
+                "title": row.get("title", "").strip(),
+                "company": row.get("company", "").strip(),
+            }
+        )
 
     logger.info("Loaded %d prospects from CSV: %s", len(prospects), file_path)
     return prospects
@@ -91,13 +154,15 @@ async def load_prospects_from_csv_bytes(csv_bytes: bytes) -> list[dict[str, Any]
     content = csv_bytes.decode("utf-8")
     reader = csv.DictReader(io.StringIO(content))
     for row in reader:
-        prospects.append({
-            "name": row.get("name", "").strip(),
-            "email": row.get("email", "").strip() or None,
-            "linkedin_url": row.get("linkedin_url", "").strip() or None,
-            "title": row.get("title", "").strip(),
-            "company": row.get("company", "").strip(),
-        })
+        prospects.append(
+            {
+                "name": row.get("name", "").strip(),
+                "email": row.get("email", "").strip() or None,
+                "linkedin_url": row.get("linkedin_url", "").strip() or None,
+                "title": row.get("title", "").strip(),
+                "company": row.get("company", "").strip(),
+            }
+        )
     logger.info("Loaded %d prospects from uploaded CSV", len(prospects))
     return prospects
 
@@ -105,6 +170,7 @@ async def load_prospects_from_csv_bytes(csv_bytes: bytes) -> list[dict[str, Any]
 # ---------------------------------------------------------------------------
 # Segment derivation
 # ---------------------------------------------------------------------------
+
 
 def _format_findings(findings: list[dict[str, Any]], limit: int = 5) -> str:
     """Format top research findings into a concise text block for prompting."""
@@ -131,63 +197,79 @@ async def derive_segments(
 
     # Build segments from the research signal types present
     segments: list[Segment] = []
-    signal_types = {f.get("signal_type", f.get("thread_type", "unknown")) for f in research_findings}
+    signal_types = {
+        f.get("signal_type", f.get("thread_type", "unknown")) for f in research_findings
+    }
 
     # Segment 1: Always create a primary ICP segment
-    segments.append(Segment(
-        id=f"seg-{uuid.uuid4().hex[:8]}",
-        session_id=session_id,
-        label=f"Primary ICP for {product_name}",
-        description=f"Core target buyers identified from market research for {product_name}",
-        criteria={
-            "derived_from": "briefing_summary",
-            "signal_types": list(signal_types),
-        },
-        prospect_count=0,
-    ))
+    segments.append(
+        Segment(
+            id=f"seg-{uuid.uuid4().hex[:8]}",
+            session_id=session_id,
+            label=f"Primary ICP for {product_name}",
+            description=f"Core target buyers identified from market research for {product_name}",
+            criteria={
+                "derived_from": "briefing_summary",
+                "signal_types": list(signal_types),
+            },
+            prospect_count=0,
+        )
+    )
 
     # Segment 2: If audience signals exist, create an audience-pain segment
     if "audience" in signal_types:
-        audience_findings = [f for f in research_findings if f.get("signal_type", f.get("thread_type")) == "audience"]
+        audience_findings = [
+            f for f in research_findings if f.get("signal_type", f.get("thread_type")) == "audience"
+        ]
         top_claim = audience_findings[0].get("claim", "") if audience_findings else ""
-        segments.append(Segment(
-            id=f"seg-{uuid.uuid4().hex[:8]}",
-            session_id=session_id,
-            label="Pain-point driven buyers",
-            description=f"Prospects whose pain points align with: {top_claim[:120]}",
-            criteria={
-                "derived_from": "audience_research",
-                "pain_signal": top_claim[:200],
-            },
-            prospect_count=0,
-        ))
+        segments.append(
+            Segment(
+                id=f"seg-{uuid.uuid4().hex[:8]}",
+                session_id=session_id,
+                label="Pain-point driven buyers",
+                description=f"Prospects whose pain points align with: {top_claim[:120]}",
+                criteria={
+                    "derived_from": "audience_research",
+                    "pain_signal": top_claim[:200],
+                },
+                prospect_count=0,
+            )
+        )
 
     # Segment 3: If competitor signals exist, create a competitive-displacement segment
     if "competitor" in signal_types:
-        competitor_findings = [f for f in research_findings if f.get("signal_type", f.get("thread_type")) == "competitor"]
+        competitor_findings = [
+            f
+            for f in research_findings
+            if f.get("signal_type", f.get("thread_type")) == "competitor"
+        ]
         top_claim = competitor_findings[0].get("claim", "") if competitor_findings else ""
-        segments.append(Segment(
-            id=f"seg-{uuid.uuid4().hex[:8]}",
-            session_id=session_id,
-            label="Competitive displacement targets",
-            description=f"Prospects using competitor solutions vulnerable to: {top_claim[:120]}",
-            criteria={
-                "derived_from": "competitor_research",
-                "competitive_signal": top_claim[:200],
-            },
-            prospect_count=0,
-        ))
+        segments.append(
+            Segment(
+                id=f"seg-{uuid.uuid4().hex[:8]}",
+                session_id=session_id,
+                label="Competitive displacement targets",
+                description=f"Prospects using competitor solutions vulnerable to: {top_claim[:120]}",
+                criteria={
+                    "derived_from": "competitor_research",
+                    "competitive_signal": top_claim[:200],
+                },
+                prospect_count=0,
+            )
+        )
 
     # Ensure at least 2 segments (issue acceptance criteria)
     if len(segments) < 2:
-        segments.append(Segment(
-            id=f"seg-{uuid.uuid4().hex[:8]}",
-            session_id=session_id,
-            label=f"Early adopters for {product_name}",
-            description="Technology-forward buyers who adopt new solutions quickly",
-            criteria={"derived_from": "default", "buyer_type": "early_adopter"},
-            prospect_count=0,
-        ))
+        segments.append(
+            Segment(
+                id=f"seg-{uuid.uuid4().hex[:8]}",
+                session_id=session_id,
+                label=f"Early adopters for {product_name}",
+                description="Technology-forward buyers who adopt new solutions quickly",
+                criteria={"derived_from": "default", "buyer_type": "early_adopter"},
+                prospect_count=0,
+            )
+        )
 
     return segments
 
@@ -195,6 +277,7 @@ async def derive_segments(
 # ---------------------------------------------------------------------------
 # Prospect scoring
 # ---------------------------------------------------------------------------
+
 
 def calculate_fit_score(prospect: dict[str, Any], segment: Segment) -> float:
     """Calculate how well a prospect fits the segment criteria.
@@ -240,7 +323,8 @@ def calculate_urgency_score(prospect: dict[str, Any], top_findings: list[dict[st
 
     # Boost for temporal / market signals (time-sensitive intelligence)
     temporal_signals = [
-        f for f in top_findings
+        f
+        for f in top_findings
         if f.get("signal_type", f.get("thread_type")) in ("temporal", "market")
     ]
     if temporal_signals:
@@ -292,19 +376,21 @@ async def score_prospects(
         angle = recommend_angle(raw, top_findings)
         channel = recommend_channel(raw, primary_segment) if primary_segment else "email"
 
-        scored.append({
-            "id": prospect_id,
-            "name": raw.get("name", ""),
-            "email": raw.get("email"),
-            "linkedin_url": raw.get("linkedin_url"),
-            "title": raw.get("title", ""),
-            "company": raw.get("company", ""),
-            "fit_score": round(fit, 2),
-            "urgency_score": round(urgency, 2),
-            "angle_recommendation": angle,
-            "channel_recommendation": channel,
-            "personalization_fields": {},
-        })
+        scored.append(
+            {
+                "id": prospect_id,
+                "name": raw.get("name", ""),
+                "email": raw.get("email"),
+                "linkedin_url": raw.get("linkedin_url"),
+                "title": raw.get("title", ""),
+                "company": raw.get("company", ""),
+                "fit_score": round(fit, 2),
+                "urgency_score": round(urgency, 2),
+                "angle_recommendation": angle,
+                "channel_recommendation": channel,
+                "personalization_fields": {},
+            }
+        )
 
     # Sort by combined score (fit + urgency) descending
     scored.sort(key=lambda p: p["fit_score"] + p["urgency_score"], reverse=True)
@@ -328,6 +414,7 @@ def build_prospect_card(prospect: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # UI frame builders
 # ---------------------------------------------------------------------------
+
 
 def build_segment_selector_frame(segments: list[Segment], instance_id: str) -> dict[str, Any]:
     """Build a SegmentSelector UI frame for the WebSocket stream."""
@@ -379,6 +466,7 @@ def build_prospect_picker_frame(cards: list[dict[str, Any]], instance_id: str) -
 # ---------------------------------------------------------------------------
 # Main agent node — plugs into the LangGraph graph
 # ---------------------------------------------------------------------------
+
 
 async def segment_agent_node(state: CampaignState) -> dict:
     """Derive segments, load and score prospects, emit UI frames.
