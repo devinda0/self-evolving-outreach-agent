@@ -22,6 +22,10 @@ async def _setup_teardown():
 
     # Prevent the per-test fixture in test_api_campaign.py from conflicting.
     settings.DB_NAME = TEST_DB
+    # Disable webhook signature verification in integration tests; the HMAC
+    # helper is covered by the unit tests in TestVerifyResendSignature.
+    original_webhook_secret = settings.RESEND_WEBHOOK_SECRET
+    settings.RESEND_WEBHOOK_SECRET = ""
     await connect_db()
     await create_indexes()
 
@@ -35,6 +39,8 @@ async def _setup_teardown():
     db = get_db()
     await db.client.drop_database(TEST_DB)
     await close_db()
+
+    settings.RESEND_WEBHOOK_SECRET = original_webhook_secret
 
     # Reset again so the next test starts clean.
     campaign_module.reset_graph()
