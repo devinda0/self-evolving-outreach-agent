@@ -11,18 +11,12 @@ export { default as VariantGrid } from "../VariantGrid";
 export { default as ChannelSelector } from "../ChannelSelector";
 export { default as DeploymentConfirm } from "../DeploymentConfirm";
 export { default as DeliveryStatusCard } from "../DeliveryStatusCard";
+export { default as ABResults } from "../ABResults";
+export { default as CycleSummary } from "../CycleSummary";
 
 interface Props {
   frame: UIFrame;
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
-}
-
-export function ABResults(props: Props) {
-  return <StubComponent {...props} />;
-}
-
-export function CycleSummary(props: Props) {
-  return <StubComponent {...props} />;
 }
 
 export function ErrorCard(props: Props) {
