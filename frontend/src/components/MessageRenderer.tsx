@@ -47,7 +47,18 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <ErrorCard {...props} />;
     default:
       return (
-        <pre className="rounded bg-gray-100 p-3 text-xs text-gray-600">
+        <pre
+          className="overflow-auto"
+          style={{
+            background: "var(--bg-surface-2)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+            padding: "12px",
+            fontSize: "11px",
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-muted)",
+          }}
+        >
           {JSON.stringify(frame, null, 2)}
         </pre>
       );
@@ -68,20 +79,40 @@ export default function MessageRenderer({ message, onAction }: MessageRendererPr
 
   if (message.uiComponent) {
     return (
-      <div className="my-2 max-w-2xl">
+      <div style={{ padding: "8px 0" }} className="animate-fade-in-up">
         <UIComponentDispatcher frame={message.uiComponent} onAction={onAction} />
       </div>
     );
   }
 
   return (
-    <div className={`my-2 flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div
+      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+      style={{
+        padding: "4px 0",
+        animation: isUser ? "slide-in-right 0.3s ease-out both" : "slide-in-left 0.3s ease-out both",
+      }}
+    >
       <div
-        className={`max-w-xl rounded-lg px-4 py-2 text-sm whitespace-pre-wrap ${
-          isUser
-            ? "bg-indigo-600 text-white"
-            : "bg-gray-100 text-gray-900"
-        }`}
+        className="whitespace-pre-wrap"
+        style={{
+          maxWidth: isUser ? "75%" : "85%",
+          padding: "10px 14px",
+          fontSize: "13px",
+          lineHeight: "1.6",
+          borderRadius: isUser ? "var(--radius-lg) var(--radius-lg) 4px var(--radius-lg)" : "var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px",
+          ...(isUser
+            ? {
+                background: "var(--accent)",
+                color: "var(--bg-base)",
+                fontWeight: 500,
+              }
+            : {
+                background: "var(--bg-surface-2)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--border-subtle)",
+              }),
+        }}
       >
         {message.content}
       </div>

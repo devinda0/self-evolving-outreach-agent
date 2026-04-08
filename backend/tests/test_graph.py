@@ -178,7 +178,13 @@ async def test_research_synthesizer_node_returns_briefing():
 
 
 async def test_segment_agent_node_returns_candidates():
-    result = await segment_agent_node(_make_state())
+    from unittest.mock import AsyncMock, patch
+
+    with (
+        patch("app.agents.segment_agent.save_segments", new_callable=AsyncMock),
+        patch("app.agents.segment_agent.save_prospect_cards", new_callable=AsyncMock),
+    ):
+        result = await segment_agent_node(_make_state())
     assert len(result["segment_candidates"]) >= 1
 
 

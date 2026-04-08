@@ -34,10 +34,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
 
       - name: Run integration tests
-        run: uv run pytest tests/integration/ -m integration -v --tb=short
+        run: .venv/bin/pytest tests/integration/ -m integration -v --tb=short
         env:
           MONGODB_URI: mongodb://localhost:27017
           DB_NAME: signal_integration_test

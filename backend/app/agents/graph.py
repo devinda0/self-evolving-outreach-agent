@@ -13,6 +13,7 @@ from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
 from app.agents.orchestrator import clarify_node, orchestrator_node
+from app.agents.segment_agent import segment_agent_node
 from app.db.client import get_db
 from app.models.campaign_state import CampaignState
 
@@ -95,14 +96,6 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
     )
     return {
         "briefing_summary": f"Stub briefing summary — synthesized {findings_count} findings",
-    }
-
-
-async def segment_agent_node(state: CampaignState) -> dict:
-    """STUB: derive segments and score prospects."""
-    logger.info("segment_agent_node called | session=%s", state.get("session_id"))
-    return {
-        "segment_candidates": [{"id": "seg-stub-1", "label": "Stub segment"}],
     }
 
 
