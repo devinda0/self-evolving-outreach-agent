@@ -277,9 +277,12 @@ async def test_deployment_agent_node_sends_when_confirmed():
     assert result["pending_ui_frames"][0]["component"] == "DeliveryStatusCard"
 
 
-async def test_feedback_agent_node_returns_results():
-    result = await feedback_agent_node(_make_state())
-    assert len(result["engagement_results"]) >= 1
+async def test_feedback_agent_node_no_events_emits_prompt():
+    """With no normalized_feedback_events, the agent emits a FeedbackPrompt UI frame."""
+    result = await feedback_agent_node(_make_state(normalized_feedback_events=[]))
+    frames = result.get("pending_ui_frames", [])
+    assert len(frames) == 1
+    assert frames[0]["component"] == "FeedbackPrompt"
 
 
 async def test_clarify_node_returns_question():

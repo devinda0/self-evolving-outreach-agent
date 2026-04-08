@@ -11,6 +11,7 @@ from app.db.collections import (
     CONTENT_VARIANTS,
     DEPLOYMENT_RECORDS,
     FEEDBACK_EVENTS,
+    INTELLIGENCE_ENTRIES,
     PROSPECT_CARDS,
     QUARANTINE,
     RESEARCH_FINDINGS,
@@ -76,6 +77,27 @@ async def get_top_findings(
     return results
 
 
+async def update_finding_confidence(finding_id: str, delta: float) -> None:
+    """Increment the confidence score for a finding by delta, clamped to [0.0, 1.0]."""
+    db = get_db()
+    # Use $min/$max after $inc to clamp the result within [0.0, 1.0]
+    await db[RESEARCH_FINDINGS].find_one_and_update(
+        {"id": finding_id},
+        [
+            {
+                "$set": {
+                    "confidence": {
+                        "$min": [
+                            1.0,
+                            {"$max": [0.0, {"$add": ["$confidence", delta]}]},
+                        ]
+                    }
+                }
+            }
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Content variants
 # ---------------------------------------------------------------------------
@@ -134,6 +156,29 @@ async def save_quarantine_event(event: dict[str, Any]) -> None:
     """Insert an unmatched/quarantined event."""
     db = get_db()
     await db[QUARANTINE].insert_one(event)
+
+
+# ---------------------------------------------------------------------------
+# Intelligence entries
+# ---------------------------------------------------------------------------
+
+async def save_intelligence_entry(entry: dict[str, Any]) -> None:
+    """Insert a learning delta / intelligence entry."""
+    db = get_db()
+    await db[INTELLIGENCE_ENTRIES].insert_one({**entry})
+
+
+async def get_intelligence_entries(session_id: str) -> list[dict[str, Any]]:
+    """Return all intelligence entries for a session, ordered by cycle_number."""
+    db = get_db()
+    cursor = db[INTELLIGENCE_ENTRIES].find({"session_id": session_id}).sort(
+        "cycle_number", ASCENDING
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -228,12 +273,16 @@ async def create_indexes() -> None:
     await db[RESEARCH_FINDINGS].create_index(
         [("session_id", ASCENDING), ("confidence", DESCENDING)]
     )
+    await db[RESEARCH_FINDINGS].create_index("id")
     await db[DEPLOYMENT_RECORDS].create_index("provider_message_id")
     await db[FEEDBACK_EVENTS].create_index("dedupe_key", unique=True)
     await db[TOOL_CACHE].create_index("expires_at", expireAfterSeconds=0)
     await db[SEGMENTS].create_index("session_id")
     await db[PROSPECT_CARDS].create_index(
         [("session_id", ASCENDING), ("fit_score", DESCENDING)]
+    )
+    await db[INTELLIGENCE_ENTRIES].create_index(
+        [("session_id", ASCENDING), ("cycle_number", ASCENDING)]
     )
 
 

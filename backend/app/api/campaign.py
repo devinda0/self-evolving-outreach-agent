@@ -257,7 +257,7 @@ async def _run_graph_for_message(
     graph = _get_or_init_graph()
     config: RunnableConfig = {
         "configurable": {"thread_id": session_id},
-        "recursion_limit": 50,
+        "recursion_limit": 25,
     }
 
     # Every new turn: inject product context + new user message, reset
