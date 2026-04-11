@@ -25,6 +25,7 @@ export function useWebSocket(sessionId: string | null) {
         case "token_end":
           store.setStreaming(false);
           store.setPendingAction(false);
+          store.setWaitingForResponse(false);
           break;
         case "ui_component":
           store.addUIFrame(frame as unknown as Parameters<typeof store.addUIFrame>[0]);
@@ -79,6 +80,7 @@ export function useWebSocket(sessionId: string | null) {
     ws.onclose = () => {
       useCampaignStore.getState().setWsStatus("disconnected");
       useCampaignStore.getState().setStreaming(false);
+      useCampaignStore.getState().setWaitingForResponse(false);
       // Auto-reconnect
       reconnectTimer.current = setTimeout(() => {
         connect();

@@ -44,6 +44,32 @@ async def load_campaign_state(session_id: str) -> dict[str, Any] | None:
     return doc
 
 
+async def list_campaigns(limit: int = 50) -> list[dict[str, Any]]:
+    """Return recent campaigns with summary fields, ordered by updated_at desc."""
+    db = get_db()
+    cursor = (
+        db[CAMPAIGN_SESSIONS]
+        .find(
+            {},
+            {
+                "_id": 0,
+                "session_id": 1,
+                "product_name": 1,
+                "target_market": 1,
+                "current_intent": 1,
+                "cycle_number": 1,
+                "updated_at": 1,
+            },
+        )
+        .sort("updated_at", DESCENDING)
+        .limit(limit)
+    )
+    results = []
+    async for doc in cursor:
+        results.append(doc)
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Research findings
 # ---------------------------------------------------------------------------

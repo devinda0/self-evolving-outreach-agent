@@ -6,10 +6,246 @@ import MessageRenderer from "./components/MessageRenderer";
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface CampaignSummary {
+  session_id: string;
+  product_name: string;
+  target_market: string;
+  current_intent: string | null;
+  cycle_number: number;
+  updated_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Campaign History Panel
+// ---------------------------------------------------------------------------
+
+function CampaignHistory({
+  onResume,
+  onNewCampaign,
+}: {
+  onResume: (id: string) => void;
+  onNewCampaign: () => void;
+}) {
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/campaign/list`);
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const data: CampaignSummary[] = await res.json();
+        if (!cancelled) setCampaigns(data);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  function formatDate(iso: string | null) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    if (diff < 60_000) return "Just now";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  function stageLabel(intent: string | null): string {
+    if (!intent) return "Started";
+    const map: Record<string, string> = {
+      research: "Researching",
+      segment: "Segmentation",
+      generate: "Content",
+      deploy: "Deployment",
+      feedback: "Feedback",
+    };
+    return map[intent] ?? intent;
+  }
+
+  return (
+    <div
+      className="relative flex min-h-screen items-center justify-center overflow-hidden p-4"
+      style={{ background: "var(--bg-base)" }}
+    >
+      {/* Ambient gradient orbs */}
+      <div
+        className="pointer-events-none absolute -left-40 -top-40 h-[500px] w-[500px] rounded-full opacity-30"
+        style={{ background: "radial-gradient(circle, rgba(0,212,170,0.12) 0%, transparent 70%)" }}
+      />
+      <div
+        className="pointer-events-none absolute -bottom-32 -right-32 h-[400px] w-[400px] rounded-full opacity-20"
+        style={{ background: "radial-gradient(circle, rgba(77,171,247,0.1) 0%, transparent 70%)" }}
+      />
+
+      <div
+        className="animate-fade-in-up relative w-full max-w-2xl p-8"
+        style={{
+          background: "var(--bg-surface-1)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-xl)",
+          boxShadow: "0 0 80px rgba(0,212,170,0.04), 0 2px 40px rgba(0,0,0,0.4)",
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-lg"
+              style={{ background: "var(--accent-glow)", border: "1px solid rgba(0,212,170,0.2)" }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            </div>
+            <div>
+              <h1 style={{ fontFamily: "var(--font-display)", fontSize: "20px", fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+                Signal to Action
+              </h1>
+              <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
+                Resume a campaign or start fresh
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onNewCampaign}
+            className="btn-accent"
+            style={{ padding: "8px 16px", fontSize: "12px", borderRadius: "var(--radius-md)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Campaign
+          </button>
+        </div>
+
+        {/* Content */}
+        {loading && (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <div className="campaign-history-loader" />
+            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Loading campaigns…</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <p style={{ fontSize: "13px", color: "var(--danger)" }}>{error}</p>
+            <button onClick={onNewCampaign} className="btn-ghost" style={{ fontSize: "12px" }}>
+              Start New Instead
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && campaigns.length === 0 && (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <div
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "var(--radius-lg)",
+                background: "var(--bg-surface-2)",
+                border: "1px solid var(--border-subtle)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+                <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+              </svg>
+            </div>
+            <p style={{ fontSize: "13px", color: "var(--text-muted)" }}>No campaigns yet</p>
+            <button onClick={onNewCampaign} className="btn-accent" style={{ padding: "10px 24px", fontSize: "13px", borderRadius: "var(--radius-md)" }}>
+              Launch Your First Campaign
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && campaigns.length > 0 && (
+          <div className="space-y-2" style={{ maxHeight: "400px", overflowY: "auto" }}>
+            {campaigns.map((c, i) => (
+              <button
+                key={c.session_id}
+                onClick={() => onResume(c.session_id)}
+                className="campaign-history-item animate-fade-in-up"
+                style={{ animationDelay: `${i * 40}ms` }}
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="campaign-history-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <div
+                      className="truncate"
+                      style={{
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      {c.product_name || "Untitled Campaign"}
+                    </div>
+                    <div
+                      className="truncate"
+                      style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}
+                    >
+                      {c.target_market || "—"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="campaign-stage-pill">
+                    {stageLabel(c.current_intent)}
+                  </span>
+                  {c.cycle_number > 1 && (
+                    <span
+                      style={{
+                        fontSize: "9px",
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--text-muted)",
+                        background: "var(--bg-surface-3)",
+                        padding: "2px 6px",
+                        borderRadius: "3px",
+                      }}
+                    >
+                      C{c.cycle_number}
+                    </span>
+                  )}
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                    {formatDate(c.updated_at)}
+                  </span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Session start form
 // ---------------------------------------------------------------------------
 
-function SessionForm({ onStart }: { onStart: (id: string) => void }) {
+function SessionForm({ onStart, onBack }: { onStart: (id: string) => void; onBack: () => void }) {
   const [productName, setProductName] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [targetMarket, setTargetMarket] = useState("");
@@ -72,6 +308,29 @@ function SessionForm({ onStart }: { onStart: (id: string) => void }) {
           boxShadow: "0 0 80px rgba(0,212,170,0.04), 0 2px 40px rgba(0,0,0,0.4)",
         }}
       >
+        {/* Back link */}
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 mb-4"
+          style={{
+            background: "none",
+            border: "none",
+            fontSize: "11px",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            padding: 0,
+            transition: "color 0.15s",
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.color = "var(--accent)"}
+          onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-muted)"}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back to campaigns
+        </button>
+
         {/* Logo mark */}
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg"
@@ -201,6 +460,8 @@ function ChatThread() {
   const wsStatus = useCampaignStore((s) => s.wsStatus);
   const currentStage = useCampaignStore((s) => s.currentStage);
   const isStreaming = useCampaignStore((s) => s.isStreaming);
+  const isWaitingForResponse = useCampaignStore((s) => s.isWaitingForResponse);
+  const resetSession = useCampaignStore((s) => s.resetSession);
 
   const { sendMessage, sendUIAction } = useWebSocket(sessionId);
 
@@ -251,6 +512,30 @@ function ChatThread() {
         }}
       >
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={resetSession}
+            className="flex h-7 w-7 items-center justify-center rounded-md"
+            title="Back to campaigns"
+            style={{
+              background: "var(--bg-surface-2)",
+              border: "1px solid var(--border-default)",
+              cursor: "pointer",
+              transition: "border-color 0.2s, background 0.2s",
+              color: "var(--text-secondary)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--accent)";
+              e.currentTarget.style.color = "var(--accent)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-default)";
+              e.currentTarget.style.color = "var(--text-secondary)";
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
           <div className="flex h-7 w-7 items-center justify-center rounded-md"
                style={{ background: "var(--accent-glow)", border: "1px solid rgba(0,212,170,0.15)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -302,6 +587,29 @@ function ChatThread() {
           {messages.map((msg) => (
             <MessageRenderer key={msg.id} message={msg} onAction={handleAction} />
           ))}
+
+          {/* Thinking indicator — shown when waiting for first response after user sends message */}
+          {isWaitingForResponse && !isStreaming && (
+            <div className="thinking-indicator animate-fade-in-up">
+              <div className="thinking-indicator-inner">
+                <div className="thinking-orb-container">
+                  <div className="thinking-orb" />
+                  <div className="thinking-orb thinking-orb-2" />
+                  <div className="thinking-orb thinking-orb-3" />
+                </div>
+                <div className="thinking-text-container">
+                  <span className="thinking-label">Processing</span>
+                  <span className="thinking-dots">
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" style={{ animationDelay: "0.2s" }} />
+                    <span className="thinking-dot" style={{ animationDelay: "0.4s" }} />
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Streaming indicator */}
           {isStreaming && (
             <div className="flex items-center gap-2 py-2" style={{ color: "var(--text-muted)", fontSize: "12px" }}>
               <span className="flex gap-1">
@@ -309,7 +617,7 @@ function ChatThread() {
                 <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)", animation: "typing-pulse 1s ease-in-out 0.2s infinite" }} />
                 <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)", animation: "typing-pulse 1s ease-in-out 0.4s infinite" }} />
               </span>
-              Thinking…
+              Streaming…
             </div>
           )}
           <div ref={threadEndRef} />
@@ -358,10 +666,23 @@ function ChatThread() {
 export default function App() {
   const sessionId = useCampaignStore((s) => s.sessionId);
   const setSessionId = useCampaignStore((s) => s.setSessionId);
+  const [view, setView] = useState<"history" | "new">("history");
 
-  if (!sessionId) {
-    return <SessionForm onStart={setSessionId} />;
+  // If session is active, show chat
+  if (sessionId) {
+    return <ChatThread />;
   }
 
-  return <ChatThread />;
+  // New campaign form
+  if (view === "new") {
+    return <SessionForm onStart={setSessionId} onBack={() => setView("history")} />;
+  }
+
+  // Default: show history
+  return (
+    <CampaignHistory
+      onResume={setSessionId}
+      onNewCampaign={() => setView("new")}
+    />
+  );
 }

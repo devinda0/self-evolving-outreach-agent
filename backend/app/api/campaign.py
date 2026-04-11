@@ -13,7 +13,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from app.agents.graph import get_graph
-from app.db.crud import load_campaign_state, save_campaign_state
+from app.db.crud import list_campaigns, load_campaign_state, save_campaign_state
 
 logger = logging.getLogger(__name__)
 
@@ -432,6 +432,12 @@ async def start_campaign(req: StartCampaignRequest) -> StartCampaignResponse:
     state = _new_campaign_state(session_id, req)
     await save_campaign_state(session_id, state)
     return StartCampaignResponse(session_id=session_id)
+
+
+@router.get("/campaign/list")
+async def list_campaign_sessions() -> list[dict[str, Any]]:
+    """Return recent campaigns for the history sidebar."""
+    return await list_campaigns(limit=50)
 
 
 @router.get("/campaign/{session_id}/state")

@@ -38,6 +38,7 @@ interface CampaignStore {
   messages: Message[];
   isStreaming: boolean;
   isPendingAction: boolean;
+  isWaitingForResponse: boolean;
   currentStage: string | null;
   wsStatus: WsStatus;
 
@@ -47,9 +48,11 @@ interface CampaignStore {
   addUIFrame: (frame: UIFrame) => void;
   setStreaming: (val: boolean) => void;
   setPendingAction: (val: boolean) => void;
+  setWaitingForResponse: (val: boolean) => void;
   setWsStatus: (status: WsStatus) => void;
   setCurrentStage: (stage: string | null) => void;
   addErrorMessage: (message: string) => void;
+  resetSession: () => void;
 }
 
 let nextMsgId = 0;
@@ -63,6 +66,7 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
   messages: [],
   isStreaming: false,
   isPendingAction: false,
+  isWaitingForResponse: false,
   currentStage: null,
   wsStatus: "disconnected",
 
@@ -74,6 +78,7 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
         ...s.messages,
         { id: genMsgId(), role: "user", content, timestamp: new Date() },
       ],
+      isWaitingForResponse: true,
     })),
 
   appendToken: (token) =>
@@ -90,7 +95,7 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
           timestamp: new Date(),
         });
       }
-      return { messages: msgs };
+      return { messages: msgs, isWaitingForResponse: false };
     }),
 
   addUIFrame: (frame) =>
@@ -105,10 +110,12 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
           timestamp: new Date(),
         },
       ],
+      isWaitingForResponse: false,
     })),
 
   setStreaming: (val) => set({ isStreaming: val }),
   setPendingAction: (val) => set({ isPendingAction: val }),
+  setWaitingForResponse: (val) => set({ isWaitingForResponse: val }),
   setWsStatus: (status) => set({ wsStatus: status }),
   setCurrentStage: (stage) => set({ currentStage: stage }),
 
@@ -123,5 +130,17 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
           timestamp: new Date(),
         },
       ],
+      isWaitingForResponse: false,
     })),
+
+  resetSession: () =>
+    set({
+      sessionId: null,
+      messages: [],
+      isStreaming: false,
+      isPendingAction: false,
+      isWaitingForResponse: false,
+      currentStage: null,
+      wsStatus: "disconnected",
+    }),
 }));
