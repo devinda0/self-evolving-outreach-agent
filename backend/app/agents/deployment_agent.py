@@ -131,29 +131,28 @@ async def mock_send(channel: str, prospect: dict, content: str) -> str:
 
 
 async def send_via_email(variant: dict, prospect: dict, session_id: str) -> str:
-    """Send a real email via Resend and return the provider_message_id.
+    """Send a real email — MCP email tool first, Resend fallback.
 
-    Raises ``httpx.HTTPStatusError`` on provider errors so the caller can
-    mark the deployment record as failed.
+    Returns the provider_message_id.
     """
-    from app.tools.resend_client import send_email  # local import to keep mock-able
+    from app.tools.mcp_tools import do_send_email
 
     rendered_html = personalize_variant_html(variant, prospect)
     subject = _apply_tokens(variant.get("subject_line", ""), prospect)
+    tags = {
+        "session_id": session_id,
+        "variant_id": variant["id"],
+        "prospect_id": prospect["id"],
+    }
 
-    result = await send_email(
+    return await do_send_email(
         to_email=prospect["email"],
         to_name=prospect.get("name", ""),
         subject=subject,
         html_body=rendered_html,
-        tags={
-            "session_id": session_id,
-            "variant_id": variant["id"],
-            "prospect_id": prospect["id"],
-        },
+        tags=tags,
         session_id=session_id,
     )
-    return result["id"]  # provider_message_id for webhook correlation
 
 
 async def _dispatch_send(

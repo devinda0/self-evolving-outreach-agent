@@ -15,7 +15,7 @@ import re
 from typing import Any
 
 from app.core.llm import get_llm
-from app.tools.search import search_web
+from app.tools.mcp_tools import do_search
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ async def _search_based_discovery(
     # Execute searches
     all_results: list[dict] = []
     for query in queries:
-        results = await search_web(query, max_results=5, recency_days=90)
+        results = await do_search(query, max_results=5, recency_days=90)
         all_results.extend(results)
 
     if not all_results:

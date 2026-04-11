@@ -14,8 +14,8 @@ from uuid import uuid4
 from app.core.llm import get_llm
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
+from app.tools.mcp_tools import do_extract, do_search
 from app.tools.research_policy import DEFAULT_RESEARCH_POLICY
-from app.tools.search import extract_page, search_web
 
 logger = logging.getLogger(__name__)
 
@@ -324,16 +324,16 @@ async def research_thread_node(state: CampaignState) -> dict:
             user_directive=user_directive,
         )
 
-        # Step 2: Run searches
+        # Step 2: Run searches (MCP tool preferred, Tavily fallback)
         all_results = []
         max_results = policy.get("max_search_results_per_query", 5)
         recency_days = policy.get("recency_days", 30)
 
         for query in queries:
-            results = await search_web(query, max_results=max_results, recency_days=recency_days)
+            results = await do_search(query, max_results=max_results, recency_days=recency_days)
             all_results.extend(results)
 
-        # Step 3: Extract pages for top results (respecting policy limit)
+        # Step 3: Extract pages for top results (MCP tool preferred, Tavily fallback)
         max_pages = policy.get("max_pages_to_extract", 5)
         pages_extracted = 0
         for result in all_results:
@@ -342,7 +342,7 @@ async def research_thread_node(state: CampaignState) -> dict:
             url = result.get("url", "")
             if url:
                 try:
-                    result["full_content"] = await extract_page(url)
+                    result["full_content"] = await do_extract(url)
                     pages_extracted += 1
                 except Exception as e:
                     logger.warning("Page extract failed for %s: %s", url, e)
