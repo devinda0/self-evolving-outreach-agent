@@ -18,6 +18,7 @@ import {
   ManualFeedbackInput,
   QuarantineViewer,
 } from "./stubs";
+import VisualArtifact from "./VisualArtifact";
 
 // ---------------------------------------------------------------------------
 // Reasoning JSON detector & structured types
@@ -227,6 +228,8 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <ProspectPicker {...props} />;
     case "VariantGrid":
       return <VariantGrid {...props} />;
+    case "VisualArtifact":
+      return <VisualArtifact {...props} />;
     case "ChannelSelector":
       return <ChannelSelector {...props} />;
     case "DeploymentConfirm":

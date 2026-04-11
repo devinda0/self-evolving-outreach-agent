@@ -8,6 +8,7 @@ export { default as ClarificationPrompt } from "../ClarificationPrompt";
 export { default as SegmentSelector } from "../SegmentSelector";
 export { default as ProspectPicker } from "../ProspectPicker";
 export { default as VariantGrid } from "../VariantGrid";
+export { default as VisualArtifact } from "../VisualArtifact";
 export { default as ChannelSelector } from "../ChannelSelector";
 export { default as DeploymentConfirm } from "../DeploymentConfirm";
 export { default as DeliveryStatusCard } from "../DeliveryStatusCard";

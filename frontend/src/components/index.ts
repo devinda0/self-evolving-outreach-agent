@@ -10,6 +10,7 @@ export { default as CycleSummary } from "./CycleSummary";
 export { default as FeedbackPrompt } from "./FeedbackPrompt";
 export { default as ManualFeedbackInput } from "./ManualFeedbackInput";
 export { default as QuarantineViewer } from "./QuarantineViewer";
+export { default as VisualArtifact } from "./VisualArtifact";
 export {
   SegmentSelector,
   ProspectPicker,

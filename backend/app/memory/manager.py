@@ -162,6 +162,7 @@ class MemoryManager:
             base["source_findings"] = self._get_findings_by_ids(state)
             base["selected_segment"] = self._get_selected_segment(state)
             base["winning_angle_memory"] = state.get("prior_cycle_summary")
+            base["prospect_cards"] = self._get_prospect_cards_for_content(state)
 
         elif agent_type == "deployment":
             base["selected_variant"] = self._get_selected_variants(state)
@@ -400,6 +401,39 @@ class MemoryManager:
             }
             for p in state.get("prospect_cards", [])
             if not selected_ids or p.get("id") in selected_ids
+        ]
+
+    def _get_prospect_cards_for_content(self, state: CampaignState) -> list:
+        """Return prospect cards with personalization-relevant fields for content generation.
+
+        Includes personalization_fields, angle_recommendation, channel_recommendation,
+        and fit_score — the fields the content agent needs to deeply personalize messages.
+        """
+        all_prospects = state.get("prospect_cards", [])
+        selected_ids = set(state.get("selected_prospect_ids", []))
+
+        prospects = [
+            p for p in all_prospects
+            if not selected_ids or p.get("id") in selected_ids
+        ]
+
+        # Sort by fit_score descending, limit to top 5
+        sorted_prospects = sorted(
+            prospects, key=lambda p: p.get("fit_score", 0.0), reverse=True
+        )
+        return [
+            {
+                "id": p.get("id"),
+                "name": p.get("name"),
+                "email": p.get("email"),
+                "title": p.get("title"),
+                "company": p.get("company"),
+                "angle_recommendation": p.get("angle_recommendation"),
+                "channel_recommendation": p.get("channel_recommendation"),
+                "fit_score": p.get("fit_score"),
+                "personalization_fields": p.get("personalization_fields", {}),
+            }
+            for p in sorted_prospects[:5]
         ]
 
     # ------------------------------------------------------------------

@@ -12,6 +12,7 @@ interface ContentVariant {
   body: string;
   cta: string;
   angle_label?: string | null;
+  personalized_for?: string | null;
 }
 
 interface Props {
@@ -381,6 +382,23 @@ export default function VariantGrid({ frame, onAction }: Props) {
               <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                 <ChannelBadge channel={variant.intended_channel} />
                 {variant.angle_label && <AnglePill label={variant.angle_label} />}
+                {variant.personalized_for && (
+                  <span
+                    style={{
+                      fontSize: "9px",
+                      fontWeight: 600,
+                      fontFamily: "var(--font-mono)",
+                      color: "#22d3ee",
+                      background: "rgba(34,211,238,0.1)",
+                      border: "1px solid rgba(34,211,238,0.3)",
+                      borderRadius: "3px",
+                      padding: "2px 7px",
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    PERSONALIZED
+                  </span>
+                )}
                 <div style={{ marginLeft: "auto" }}>
                   <div
                     style={{

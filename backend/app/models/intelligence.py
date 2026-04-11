@@ -33,6 +33,7 @@ class ContentVariant(BaseModel):
     body: str
     cta: str
     angle_label: Optional[str] = None
+    personalized_for: Optional[str] = None  # prospect ID this variant was tailored for
     created_at: datetime
 
 
