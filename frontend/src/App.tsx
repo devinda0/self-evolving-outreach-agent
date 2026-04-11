@@ -22,6 +22,8 @@ function SessionForm({ onStart }: { onStart: (id: string) => void }) {
     setError(null);
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
       const res = await fetch(`${API_BASE}/campaign/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -30,7 +32,9 @@ function SessionForm({ onStart }: { onStart: (id: string) => void }) {
           product_description: productDescription,
           target_market: targetMarket,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         throw new Error(`Server returned ${res.status}`);
@@ -39,7 +43,11 @@ function SessionForm({ onStart }: { onStart: (id: string) => void }) {
       const data: { session_id: string } = await res.json();
       onStart(data.session_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start session");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Request timed out — is the backend running?");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to start session");
+      }
     } finally {
       setLoading(false);
     }

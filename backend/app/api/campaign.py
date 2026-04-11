@@ -307,6 +307,19 @@ async def _run_graph_for_message(
         "recursion_limit": 25,
     }
 
+    # Snapshot frame counts before this turn so we only drain *new* frames
+    # after the run. pending_ui_frames uses operator.add reducer and accumulates
+    # across turns — without this we'd re-send every frame from prior turns.
+    prior_frame_count = 0
+    prior_error_count = 0
+    try:
+        pre_snap = await graph.aget_state(config)  # type: ignore[arg-type]
+        if pre_snap and pre_snap.values:
+            prior_frame_count = len(pre_snap.values.get("pending_ui_frames", []))
+            prior_error_count = len(pre_snap.values.get("error_messages", []))
+    except Exception:
+        pass  # first turn — no checkpoint exists yet
+
     # Every new turn: inject product context + new user message, reset
     # session_complete so the graph doesn't exit immediately.
     input_update: dict[str, Any] = {
@@ -316,7 +329,6 @@ async def _run_graph_for_message(
         "target_market": db_state.get("target_market", ""),
         "messages": [HumanMessage(content=content)],
         "session_complete": False,
-        "pending_ui_frames": [],
     }
 
     try:
@@ -364,14 +376,16 @@ async def _run_graph_for_message(
         await websocket.send_json({"type": "error", "message": "Agent error — please try again."})
         return
 
-    # Drain UI frames queued by specialist nodes (BriefingCard, SegmentSelector, etc.)
+    # Drain only the UI frames added during *this* turn
     try:
         state_snap = await graph.aget_state(config)  # type: ignore[arg-type]
         if state_snap and state_snap.values:
-            for frame in state_snap.values.get("pending_ui_frames", []):
+            all_frames = state_snap.values.get("pending_ui_frames", [])
+            for frame in all_frames[prior_frame_count:]:
                 await _send_json_safe(websocket, frame)
-            # Surface any error messages accumulated by agents
-            for err in state_snap.values.get("error_messages", []):
+            # Surface only new error messages from this turn
+            all_errors = state_snap.values.get("error_messages", [])
+            for err in all_errors[prior_error_count:]:
                 await websocket.send_json({"type": "error", "message": str(err)})
     except Exception:
         logger.exception("Failed to retrieve pending UI frames | session=%s", session_id)

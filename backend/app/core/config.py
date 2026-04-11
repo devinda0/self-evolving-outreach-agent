@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Dev flags
     USE_MOCK_SEND: bool = True  # Set false to use real Resend/Unipile
 
+    # LLM — use get_llm() from app.core.llm to instantiate the client
+    OPENAI_API_KEY: str = ""
+    LLM_MODEL: str = "gpt-4o"
+    LLM_BASE_URL: str = ""  # leave empty to use the default OpenAI endpoint
+    USE_MOCK_LLM: bool = False  # set True in tests to skip real API calls
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

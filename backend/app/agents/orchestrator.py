@@ -18,9 +18,8 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-
 from app.core.config import settings
+from app.core.llm import get_llm
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.ui_frames import UIAction, UIFrame
@@ -89,18 +88,8 @@ DEFAULT_OPTIONS = ["Research competitors", "Generate content", "Deploy campaign"
 
 
 def _get_llm():
-    """Get the Gemini LLM client."""
-    if settings.USE_MOCK_LLM:
-        return None  # Tests will provide mock
-
-    if not settings.GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY is not set in environment variables")
-
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-pro",
-        temperature=0,
-        api_key=settings.GEMINI_API_KEY,
-    )
+    """Get the LLM client via the central factory."""
+    return get_llm(temperature=0)
 
 
 def format_messages(messages: list[Any]) -> str:

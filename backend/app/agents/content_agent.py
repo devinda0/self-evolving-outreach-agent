@@ -16,9 +16,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import settings
+from app.core.llm import get_llm
 from app.db.crud import save_content_variant
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
@@ -70,16 +70,8 @@ Each object must contain exactly these keys:
 # ---------------------------------------------------------------------------
 
 
-def _get_llm() -> ChatGoogleGenerativeAI | None:
-    if settings.USE_MOCK_LLM:
-        return None
-    if not settings.GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY is not set in environment variables")
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-pro",
-        temperature=0.4,
-        api_key=settings.GEMINI_API_KEY,
-    )
+def _get_llm():
+    return get_llm(temperature=0.4)
 
 
 def _parse_json_response(content: str) -> list[dict]:

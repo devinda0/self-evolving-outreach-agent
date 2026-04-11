@@ -4,6 +4,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 from app.api import campaign, health, prospects, webhooks
 from app.db.client import close_db, connect_db
 from app.db.crud import create_indexes
