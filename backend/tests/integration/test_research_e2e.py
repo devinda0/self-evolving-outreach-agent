@@ -254,8 +254,9 @@ async def test_research_e2e_full_pipeline():
     # Verify BriefingCard UI frame
     assert "pending_ui_frames" in synth_result
     frames = synth_result["pending_ui_frames"]
-    assert len(frames) >= 1
-    briefing_frame = frames[0]
+    assert len(frames) >= 2
+    assert frames[0]["component"] == "MessageRenderer"  # response message
+    briefing_frame = frames[1]
     assert briefing_frame["component"] == "BriefingCard"
     assert briefing_frame["type"] == "ui_component"
     assert briefing_frame["props"]["finding_count"] >= 4  # After dedup
@@ -406,7 +407,9 @@ async def test_research_e2e_failed_thread_continues():
         synth_result = await research_synthesizer_node(synth_state)
 
     assert synth_result["briefing_summary"]
-    assert synth_result["pending_ui_frames"][0]["props"]["failed_threads"] == ["channel"]
+    # Index 0 is the MessageRenderer response, index 1 is the BriefingCard
+    briefing_frame = synth_result["pending_ui_frames"][1]
+    assert briefing_frame["props"]["failed_threads"] == ["channel"]
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +601,8 @@ async def test_research_e2e_deduplication():
         synth_result = await research_synthesizer_node(synth_state)
 
     # Should have 2 unique findings (duplicate "AI CRM market..." kept with higher confidence)
-    assert synth_result["pending_ui_frames"][0]["props"]["finding_count"] == 2
+    # Index 0 is the MessageRenderer response, index 1 is the BriefingCard
+    assert synth_result["pending_ui_frames"][1]["props"]["finding_count"] == 2
 
     # The kept duplicate should be the one with 0.85 (higher confidence)
     db_findings = await get_top_findings(session_id, k=50)

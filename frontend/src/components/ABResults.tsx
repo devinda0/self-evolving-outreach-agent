@@ -1,4 +1,5 @@
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface VariantResult {
   variant_id: string;
@@ -319,6 +320,7 @@ function VariantCard({
 export default function ABResults({ frame, onAction }: Props) {
   const results = (frame.props.results as VariantResult[]) ?? [];
   const winnerVariantId = (frame.props.winner_variant_id as string | null) ?? null;
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
   const significance = frame.props.significance as {
     comparisons?: Array<{
       variant_a: string;
@@ -597,9 +599,23 @@ export default function ABResults({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-accent"
+          disabled={isPendingAction}
           onClick={handleNextCycle}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            opacity: isPendingAction ? 0.6 : undefined,
+          }}
         >
-          Run Next Cycle
+          {isPendingAction ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Processing…
+            </>
+          ) : (
+            "Run Next Cycle"
+          )}
         </button>
       </div>
     </div>

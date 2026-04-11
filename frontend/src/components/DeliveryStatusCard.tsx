@@ -1,4 +1,5 @@
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface ChannelDelivery {
   channel: string;
@@ -75,6 +76,7 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
   const totalSent = (frame.props.total_sent as number) ?? 0;
   const failed = (frame.props.failed as number) ?? 0;
   const breakdown = (frame.props.breakdown as ChannelDelivery[]) ?? [];
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const allSuccess = failed === 0;
 
@@ -408,6 +410,7 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
         >
           <button
             type="button"
+            disabled={isPendingAction}
             onClick={handleRetry}
             style={{
               fontSize: "11px",
@@ -418,8 +421,9 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
               border: "1px solid rgba(255,212,59,0.3)",
               borderRadius: "var(--radius-sm)",
               padding: "6px 14px",
-              cursor: "pointer",
+              cursor: isPendingAction ? "default" : "pointer",
               transition: "all 0.15s ease",
+              opacity: isPendingAction ? 0.5 : undefined,
             }}
           >
             Retry Failed ({allFailedRecipients.length})
@@ -439,11 +443,13 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-ghost"
+          disabled={isPendingAction}
           onClick={handleViewResults}
           style={{
             fontSize: "12px",
             padding: "8px 18px",
             borderRadius: "var(--radius-sm)",
+            opacity: isPendingAction ? 0.5 : undefined,
           }}
         >
           View Results Later
@@ -451,14 +457,26 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-accent"
+          disabled={isPendingAction}
           onClick={handleNextCycle}
           style={{
             fontSize: "12px",
             padding: "8px 20px",
             borderRadius: "var(--radius-sm)",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            opacity: isPendingAction ? 0.6 : undefined,
           }}
         >
-          Run Next Cycle
+          {isPendingAction ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Processing…
+            </>
+          ) : (
+            "Run Next Cycle"
+          )}
         </button>
       </div>
     </div>

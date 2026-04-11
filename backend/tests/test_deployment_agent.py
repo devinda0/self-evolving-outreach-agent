@@ -261,7 +261,8 @@ class TestDeploymentAgentNode:
 
         assert result["next_node"] == "orchestrator"
         assert "ab_split_plan" in result
-        assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"
+        assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+        assert result["pending_ui_frames"][1]["component"] == "DeploymentConfirm"
 
     async def test_creates_records_when_confirmed(self):
         state = _make_state(
@@ -280,7 +281,8 @@ class TestDeploymentAgentNode:
         assert len(result["deployment_records"]) == 4
         assert result["deployment_confirmed"] is False
         assert result["next_node"] == "orchestrator"
-        assert result["pending_ui_frames"][0]["component"] == "DeliveryStatusCard"
+        assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+        assert result["pending_ui_frames"][1]["component"] == "DeliveryStatusCard"
 
     async def test_ten_prospects_two_variants_creates_ten_records(self):
         """AC: Given 2 variants and 10 prospects, creates 10 deployment records (5 per cohort)."""
@@ -790,7 +792,8 @@ class TestProductionModePreFlight:
             mock_settings.PHYSICAL_ADDRESS = "123 Main St"
             result = await deployment_agent_node(state)
 
-        assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"
+        assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+        assert result["pending_ui_frames"][1]["component"] == "DeploymentConfirm"
 
     async def test_mock_mode_skips_preflight(self):
         """Pre-flight check is only run when USE_MOCK_SEND=False."""
@@ -803,4 +806,5 @@ class TestProductionModePreFlight:
         )
         # USE_MOCK_SEND defaults to True — should not block
         result = await deployment_agent_node(state)
-        assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"
+        assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+        assert result["pending_ui_frames"][1]["component"] == "DeploymentConfirm"

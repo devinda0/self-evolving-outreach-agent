@@ -248,7 +248,8 @@ async def test_research_synthesizer_node_returns_briefing():
     assert len(result["briefing_summary"]) > 0
     assert "research_gaps" in result
     assert "pending_ui_frames" in result
-    assert result["pending_ui_frames"][0]["component"] == "BriefingCard"
+    assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+    assert result["pending_ui_frames"][1]["component"] == "BriefingCard"
 
 
 async def test_segment_agent_node_returns_candidates():
@@ -297,7 +298,8 @@ async def test_deployment_agent_node_emits_confirm_when_not_confirmed():
     result = await deployment_agent_node(state)
     assert result["next_node"] == "orchestrator"
     assert "pending_ui_frames" in result
-    assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"
+    assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+    assert result["pending_ui_frames"][1]["component"] == "DeploymentConfirm"
     assert "ab_split_plan" in result
 
 
@@ -337,7 +339,8 @@ async def test_deployment_agent_node_sends_when_confirmed():
     msg_ids = {r["provider_message_id"] for r in result["deployment_records"]}
     assert len(msg_ids) == 2
     # Check UI frame
-    assert result["pending_ui_frames"][0]["component"] == "DeliveryStatusCard"
+    assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+    assert result["pending_ui_frames"][1]["component"] == "DeliveryStatusCard"
 
 
 async def test_feedback_agent_node_no_events_emits_prompt():

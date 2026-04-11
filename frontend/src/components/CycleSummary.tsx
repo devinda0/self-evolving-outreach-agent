@@ -1,4 +1,5 @@
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface Props {
   frame: UIFrame;
@@ -154,6 +155,7 @@ export default function CycleSummary({ frame, onAction }: Props) {
   const learningDelta = (frame.props.learning_delta as string) ?? "";
   const winnerVariantId = (frame.props.winner_variant_id as string | null) ?? null;
   const winnerReplyRate = (frame.props.winner_reply_rate as number | null) ?? null;
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
   const nextCycleAction = frame.actions.find(
     (a: UIAction) =>
@@ -366,14 +368,30 @@ export default function CycleSummary({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-accent"
+          disabled={isPendingAction}
           onClick={handleNextCycle}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            opacity: isPendingAction ? 0.6 : undefined,
+          }}
         >
-          Run Next Cycle
+          {isPendingAction ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Processing…
+            </>
+          ) : (
+            "Run Next Cycle"
+          )}
         </button>
         <button
           type="button"
           className="btn-ghost"
+          disabled={isPendingAction}
           onClick={handleViewFindings}
+          style={{ opacity: isPendingAction ? 0.5 : undefined }}
         >
           <SearchIcon />
           View Updated Findings

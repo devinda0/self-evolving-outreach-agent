@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UIFrame, UIAction } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface Props {
   frame: UIFrame;
@@ -42,6 +43,7 @@ export default function FeedbackPrompt({ frame, onAction }: Props) {
     "No engagement events received yet. You can report results manually or wait for webhook events.";
 
   const [clickedId, setClickedId] = useState<string | null>(null);
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
   const isActed = clickedId !== null;
 
   function handleAction(action: UIAction) {
@@ -117,7 +119,7 @@ export default function FeedbackPrompt({ frame, onAction }: Props) {
               <button
                 key={action.id}
                 type="button"
-                disabled={isActed}
+                disabled={isActed || isPendingAction}
                 onClick={() => handleAction(action)}
                 className={isPrimary ? "btn-accent" : "btn-ghost"}
                 style={
@@ -135,7 +137,14 @@ export default function FeedbackPrompt({ frame, onAction }: Props) {
                     : undefined
                 }
               >
-                {action.label}
+                {isClicked && isPendingAction ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    {action.label}
+                  </>
+                ) : (
+                  action.label
+                )}
               </button>
             );
           })}

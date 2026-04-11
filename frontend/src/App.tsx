@@ -482,6 +482,7 @@ function ChatThread() {
       return;
     }
     useCampaignStore.getState().setPendingAction(true);
+    useCampaignStore.getState().setWaitingForResponse(true);
     sendUIAction(instanceId, actionId, payload);
   }
 
@@ -583,7 +584,7 @@ function ChatThread() {
         className="flex-1 overflow-y-auto px-4 py-5"
         style={{ background: "var(--bg-base)" }}
       >
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-2xl md:max-w-3xl lg:max-w-4xl">
           {messages.map((msg) => (
             <MessageRenderer key={msg.id} message={msg} onAction={handleAction} />
           ))}
@@ -628,7 +629,7 @@ function ChatThread() {
       <div className="shrink-0" style={{ background: "var(--bg-surface-1)", borderTop: "1px solid var(--border-subtle)" }}>
         <form
           onSubmit={handleSend}
-          className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-3"
+          className="mx-auto flex max-w-2xl md:max-w-3xl lg:max-w-4xl items-center gap-2 px-4 py-3"
         >
           <input
             value={input}

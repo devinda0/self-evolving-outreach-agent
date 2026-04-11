@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UIFrame } from "../store/campaignStore";
+import { useCampaignStore } from "../store/campaignStore";
 
 interface Props {
   frame: UIFrame;
@@ -10,6 +11,7 @@ export default function ClarificationPrompt({ frame, onAction }: Props) {
   const question = (frame.props.question as string) ?? "";
   const options = (frame.props.options as string[]) ?? [];
   const [clickedIdx, setClickedIdx] = useState<number | null>(null);
+  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
   const answered = clickedIdx !== null;
 
   function handleOptionClick(option: string, i: number) {
@@ -39,46 +41,66 @@ export default function ClarificationPrompt({ frame, onAction }: Props) {
       {/* Options */}
       {options.length > 0 && (
         <div className="flex flex-wrap gap-2" style={{ padding: "12px 20px" }}>
-          {options.map((option, i) => (
-            <button
-              key={i}
-              type="button"
-              disabled={answered}
-              className="btn-ghost"
-              style={
-                clickedIdx === i
-                  ? { borderColor: "var(--accent)", color: "var(--accent)", background: "var(--accent-glow)" }
-                  : answered
-                    ? { opacity: 0.4, cursor: "default" }
-                    : undefined
-              }
-              onClick={() => handleOptionClick(option, i)}
-            >
-              {option}
-            </button>
-          ))}
+          {options.map((option, i) => {
+            const isClicked = clickedIdx === i;
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={answered || isPendingAction}
+                className="btn-ghost"
+                style={
+                  isClicked
+                    ? { borderColor: "var(--accent)", color: "var(--accent)", background: "var(--accent-glow)" }
+                    : answered
+                      ? { opacity: 0.4, cursor: "default" }
+                      : undefined
+                }
+                onClick={() => handleOptionClick(option, i)}
+              >
+                {isClicked && isPendingAction ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    {option}
+                  </>
+                ) : (
+                  option
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
       {/* Extra actions beyond options */}
       {frame.actions.length > options.length && (
         <div className="flex flex-wrap gap-2" style={{ padding: "12px 20px", borderTop: options.length > 0 ? "1px solid var(--border-subtle)" : "none" }}>
-          {frame.actions.slice(options.length).map((action, i) => (
-            <button
-              key={action.id}
-              type="button"
-              disabled={answered}
-              className="btn-accent"
-              style={answered ? { opacity: 0.4, cursor: "default" } : undefined}
-              onClick={() => {
-                if (answered) return;
-                setClickedIdx(options.length + i);
-                onAction(frame.instance_id, action.id, action.payload);
-              }}
-            >
-              {action.label}
-            </button>
-          ))}
+          {frame.actions.slice(options.length).map((action, i) => {
+            const isClicked = clickedIdx === options.length + i;
+            return (
+              <button
+                key={action.id}
+                type="button"
+                disabled={answered || isPendingAction}
+                className="btn-accent"
+                style={answered && !isClicked ? { opacity: 0.4, cursor: "default" } : undefined}
+                onClick={() => {
+                  if (answered) return;
+                  setClickedIdx(options.length + i);
+                  onAction(frame.instance_id, action.id, action.payload);
+                }}
+              >
+                {isClicked && isPendingAction ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    {action.label}
+                  </>
+                ) : (
+                  action.label
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
