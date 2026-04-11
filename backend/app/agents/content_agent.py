@@ -16,8 +16,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-
-from app.core.config import settings
 from app.core.llm import get_llm
 from app.db.crud import save_content_variant
 from app.memory.manager import memory_manager

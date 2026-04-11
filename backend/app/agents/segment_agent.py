@@ -20,7 +20,6 @@ from app.agents.prospect_discovery import (
     calculate_weighted_fit_score,
     deduplicate_prospects,
     discover_prospects_via_research,
-    load_prospects_from_csv_with_mapping,
 )
 from app.db.crud import save_prospect_cards, save_segments
 from app.memory.manager import memory_manager

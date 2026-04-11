@@ -10,6 +10,7 @@ Configuration via environment variables (see config.py):
 """
 
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from app.core.config import settings
 
@@ -34,6 +35,6 @@ def get_llm(temperature: float = 0) -> ChatOpenAI | None:
     return ChatOpenAI(
         model=settings.LLM_MODEL,
         temperature=temperature,
-        api_key=settings.OPENAI_API_KEY,
+        api_key=SecretStr(settings.OPENAI_API_KEY),
         base_url=settings.LLM_BASE_URL or None,
     )

@@ -17,7 +17,12 @@ from app.agents.graph import (
     research_fan_out,
     route_from_orchestrator,
 )
-from app.agents.orchestrator import answer_node, clarify_node, orchestrator_node, update_context_node
+from app.agents.orchestrator import (
+    answer_node,
+    clarify_node,
+    orchestrator_node,
+    update_context_node,
+)
 from app.agents.research import (
     research_dispatcher_node,
     research_synthesizer_node,

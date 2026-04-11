@@ -4,15 +4,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import campaign, health, prospects, webhooks
+from app.db.client import close_db, connect_db
+from app.db.crud import create_indexes
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
     datefmt="%H:%M:%S",
 )
-
-from app.api import campaign, health, prospects, webhooks
-from app.db.client import close_db, connect_db
-from app.db.crud import create_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

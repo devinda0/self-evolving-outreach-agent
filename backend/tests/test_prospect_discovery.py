@@ -1,6 +1,5 @@
 """Tests for the prospect discovery engine — discovery, weighted scoring, deduplication, CSV mapping."""
 
-import pytest
 
 from app.agents.prospect_discovery import (
     SCORING_WEIGHTS,
@@ -17,7 +16,6 @@ from app.agents.prospect_discovery import (
     load_prospects_from_csv_with_mapping,
 )
 from app.models.prospect import Segment
-
 
 # ---------------------------------------------------------------------------
 # Helpers
