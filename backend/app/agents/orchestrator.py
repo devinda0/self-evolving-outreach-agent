@@ -40,6 +40,7 @@ VALID_INTENTS = frozenset(
         "clarify",
         "answer",
         "update_context",
+        "mcp_configure",
     ]
 )
 
@@ -55,6 +56,7 @@ INTENT_TO_NODE = {
     "clarify": "clarify",
     "answer": "answer",
     "update_context": "update_context",
+    "mcp_configure": "mcp_configure",
 }
 
 SYSTEM_PROMPT = """You are the Orchestrator of Signal to Action, a multi-agent growth intelligence system.
@@ -69,6 +71,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - deploy: user wants to send content to a channel
 - feedback: user is reporting engagement results or a webhook event has arrived
 - refined_cycle: user wants to restart the loop using accumulated intelligence
+- mcp_configure: user wants to configure, add, remove, list, or manage MCP servers/tools — this includes providing MCP URLs, asking to connect external services via MCP, or managing tool integrations
 - answer: user is asking a question about the campaign, product, system status, strategy, or any topic that can be answered from existing context — NOT requesting new research or content generation
 - update_context: user is providing clarifications, corrections, or additional information about their product, company, target market, goals, or preferences — NOT requesting an action
 - clarify: message is genuinely ambiguous and you cannot determine ANY of the above intents — generate a specific clarification question
@@ -79,6 +82,8 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - "Go back to research" → override any prior intent immediately with "research"
 - "Send only to John" or "remove Alice from the list" or "add john@example.com" or "show me the prospects" or "upload a CSV" or "I only want to send to sarah@company.com" → "prospect_manage"
 - "who are we sending to?" or "show selected prospects" → "prospect_manage"
+- "configure MCP server" or "add mcp" or "connect brightdata" or any MCP/tool server URL → "mcp_configure"
+- "list mcp servers" or "show connected tools" or "remove mcp server" → "mcp_configure"
 - If user asks a direct question (e.g. "what is our target market?", "how many variants did we create?", "what should I focus on?") → "answer"
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
@@ -88,7 +93,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 
 ## Output format (strict JSON, no prose, no markdown code blocks)
 {
-  "current_intent": "<one of: research, segment, prospect_manage, generate, deploy, feedback, refined_cycle, answer, update_context, clarify>",
+  "current_intent": "<one of: research, segment, prospect_manage, generate, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
   "reasoning": "<one sentence explaining your classification>",
   "user_directive": "<a clear, actionable summary of WHAT the user wants the next agent to do — capture specific focus areas, constraints, preferences, and tone from the user's message. Examples: 'Research competitor pricing strategies for enterprise SaaS', 'Generate 3 email variants with a casual, friendly tone focused on cost savings', 'Deploy only the ROI-focused variant to top 3 prospects'. This MUST reflect the user's specific request, not a generic description of what the agent does.>",
   "clarification_question": "<only if current_intent=clarify, else null>",
@@ -98,10 +103,10 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 
 DEFAULT_CLARIFICATION = (
     "I didn't quite catch that — could you clarify what you'd like to do? "
-    "(research / segment / manage prospects / generate / deploy / feedback)"
+    "(research / segment / manage prospects / generate / deploy / feedback / configure MCP)"
 )
 
-DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Generate content", "Deploy campaign", "Report feedback"]
+DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Generate content", "Deploy campaign", "Report feedback", "Configure MCP server"]
 
 
 def _get_llm():
