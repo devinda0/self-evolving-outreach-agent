@@ -13,6 +13,7 @@ from app.db.collections import (
     DEPLOYMENT_RECORDS,
     FEEDBACK_EVENTS,
     INTELLIGENCE_ENTRIES,
+    MCP_SERVERS,
     PROSPECT_CARDS,
     QUARANTINE,
     RESEARCH_FINDINGS,
@@ -405,6 +406,50 @@ async def create_indexes() -> None:
         [("session_id", ASCENDING), ("cycle_number", ASCENDING)]
     )
     await db[QUARANTINE].create_index([("session_id", ASCENDING), ("received_at", ASCENDING)])
+    await db[MCP_SERVERS].create_index("server_id", unique=True)
+
+
+# ---------------------------------------------------------------------------
+# MCP servers
+# ---------------------------------------------------------------------------
+
+
+async def save_mcp_server(config: dict[str, Any]) -> None:
+    """Upsert an MCP server configuration."""
+    db = get_db()
+    await db[MCP_SERVERS].find_one_and_update(
+        {"server_id": config["server_id"]},
+        {"$set": {**config, "updated_at": _now()}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+async def load_mcp_server(server_id: str) -> dict[str, Any] | None:
+    """Load a single MCP server configuration."""
+    db = get_db()
+    doc = await db[MCP_SERVERS].find_one({"server_id": server_id})
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def list_mcp_servers() -> list[dict[str, Any]]:
+    """Return all saved MCP server configurations."""
+    db = get_db()
+    cursor = db[MCP_SERVERS].find({}).sort("created_at", DESCENDING)
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+async def delete_mcp_server(server_id: str) -> bool:
+    """Delete an MCP server configuration. Returns True if a doc was deleted."""
+    db = get_db()
+    result = await db[MCP_SERVERS].delete_one({"server_id": server_id})
+    return result.deleted_count > 0
 
 
 # ---------------------------------------------------------------------------

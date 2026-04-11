@@ -11,6 +11,7 @@ export { default as FeedbackPrompt } from "./FeedbackPrompt";
 export { default as ManualFeedbackInput } from "./ManualFeedbackInput";
 export { default as QuarantineViewer } from "./QuarantineViewer";
 export { default as VisualArtifact } from "./VisualArtifact";
+export { default as MCPServerManager } from "./MCPServerManager";
 export {
   SegmentSelector,
   ProspectPicker,

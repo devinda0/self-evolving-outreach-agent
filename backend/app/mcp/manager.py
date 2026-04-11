@@ -1,0 +1,372 @@
+"""MCP server process lifecycle and JSON-RPC communication.
+
+Manages starting/stopping MCP server subprocesses, discovering tools via the
+MCP protocol (JSON-RPC over stdio), and invoking tools on behalf of agents.
+"""
+
+import asyncio
+import json
+import logging
+import os
+from typing import Any
+
+from app.mcp.models import (
+    MCPServerConfig,
+    MCPServerState,
+    MCPServerStatus,
+    MCPTool,
+    MCPToolParameter,
+    MCPTransport,
+)
+
+logger = logging.getLogger(__name__)
+
+# JSON-RPC message ID counter
+_msg_id = 0
+
+
+def _next_id() -> int:
+    global _msg_id
+    _msg_id += 1
+    return _msg_id
+
+
+class MCPServerProcess:
+    """Wraps a single MCP server subprocess and its JSON-RPC communication."""
+
+    def __init__(self, config: MCPServerConfig) -> None:
+        self.config = config
+        self.process: asyncio.subprocess.Process | None = None
+        self._read_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
+
+    async def start(self) -> list[MCPTool]:
+        """Start the subprocess, send initialize, and discover tools."""
+        if self.config.transport == MCPTransport.SSE:
+            raise NotImplementedError("SSE transport is not yet supported")
+
+        env = {**os.environ, **self.config.env}
+
+        self.process = await asyncio.create_subprocess_exec(
+            self.config.command,
+            *self.config.args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+
+        # Initialize handshake
+        init_result = await self._send_request("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "signal-to-action", "version": "0.1.0"},
+        })
+
+        if init_result is None:
+            raise RuntimeError("MCP server did not respond to initialize")
+
+        # Send initialized notification
+        await self._send_notification("notifications/initialized", {})
+
+        # Discover tools
+        tools_result = await self._send_request("tools/list", {})
+        tools: list[MCPTool] = []
+        if tools_result and "tools" in tools_result:
+            for raw_tool in tools_result["tools"]:
+                tools.append(_parse_tool(raw_tool))
+
+        return tools
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """Invoke a tool and return the result."""
+        result = await self._send_request("tools/call", {
+            "name": tool_name,
+            "arguments": arguments,
+        })
+
+        if result is None:
+            raise RuntimeError(f"No response from MCP server for tool '{tool_name}'")
+
+        # MCP tools return content array
+        content = result.get("content", [])
+        if len(content) == 1 and content[0].get("type") == "text":
+            return content[0]["text"]
+        return content
+
+    async def stop(self) -> None:
+        """Terminate the subprocess."""
+        if self.process and self.process.returncode is None:
+            try:
+                self.process.terminate()
+                await asyncio.wait_for(self.process.wait(), timeout=5)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    self.process.kill()
+                except ProcessLookupError:
+                    pass
+        self.process = None
+
+    @property
+    def is_running(self) -> bool:
+        return self.process is not None and self.process.returncode is None
+
+    async def _send_request(self, method: str, params: dict) -> dict | None:
+        """Send a JSON-RPC request and wait for the response."""
+        if not self.process or not self.process.stdin or not self.process.stdout:
+            return None
+
+        msg_id = _next_id()
+        message = {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "method": method,
+            "params": params,
+        }
+
+        async with self._write_lock:
+            data = json.dumps(message) + "\n"
+            self.process.stdin.write(data.encode())
+            await self.process.stdin.drain()
+
+        # Read response — skip notifications until we get our response
+        async with self._read_lock:
+            try:
+                response = await asyncio.wait_for(
+                    self._read_response(msg_id), timeout=30
+                )
+                return response
+            except asyncio.TimeoutError:
+                logger.error("Timeout waiting for MCP response: method=%s id=%d", method, msg_id)
+                return None
+
+    async def _send_notification(self, method: str, params: dict) -> None:
+        """Send a JSON-RPC notification (no response expected)."""
+        if not self.process or not self.process.stdin:
+            return
+
+        message = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }
+
+        async with self._write_lock:
+            data = json.dumps(message) + "\n"
+            self.process.stdin.write(data.encode())
+            await self.process.stdin.drain()
+
+    async def _read_response(self, expected_id: int) -> dict | None:
+        """Read lines from stdout until we get the response matching expected_id."""
+        if not self.process or not self.process.stdout:
+            return None
+
+        while True:
+            line = await self.process.stdout.readline()
+            if not line:
+                return None
+
+            text = line.decode().strip()
+            if not text:
+                continue
+
+            try:
+                msg = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+
+            # Skip notifications (no id field)
+            if "id" not in msg:
+                continue
+
+            if msg.get("id") == expected_id:
+                if "error" in msg:
+                    err = msg["error"]
+                    logger.error("MCP error: %s", err)
+                    raise RuntimeError(
+                        f"MCP error {err.get('code', '?')}: {err.get('message', 'unknown')}"
+                    )
+                return msg.get("result")
+
+            # Wrong ID — could be a stale response; skip it
+            logger.debug("Skipping MCP response with unexpected id=%s (wanted %d)", msg.get("id"), expected_id)
+
+
+def _parse_tool(raw: dict) -> MCPTool:
+    """Parse a raw MCP tool definition into our model."""
+    params: list[MCPToolParameter] = []
+    schema = raw.get("inputSchema", {})
+    props = schema.get("properties", {})
+    required_set = set(schema.get("required", []))
+
+    for param_name, param_def in props.items():
+        params.append(MCPToolParameter(
+            name=param_name,
+            type=param_def.get("type", "string"),
+            description=param_def.get("description", ""),
+            required=param_name in required_set,
+        ))
+
+    return MCPTool(
+        name=raw.get("name", ""),
+        description=raw.get("description", ""),
+        parameters=params,
+        input_schema=schema,
+    )
+
+
+class MCPManager:
+    """Singleton manager for all MCP server instances."""
+
+    def __init__(self) -> None:
+        self._servers: dict[str, MCPServerState] = {}
+        self._processes: dict[str, MCPServerProcess] = {}
+        self._lock = asyncio.Lock()
+
+    async def load_from_db(self) -> None:
+        """Load saved configurations from MongoDB and start enabled servers."""
+        from app.db.crud import list_mcp_servers
+
+        configs = await list_mcp_servers()
+        for cfg_dict in configs:
+            config = MCPServerConfig(**cfg_dict)
+            self._servers[config.server_id] = MCPServerState(
+                server_id=config.server_id,
+                config=config,
+                status=MCPServerStatus.STOPPED,
+            )
+            if config.enabled:
+                # Start in background — don't block app startup
+                asyncio.create_task(self._start_server(config.server_id))
+
+    async def add_server(self, config: MCPServerConfig) -> MCPServerState:
+        """Add and optionally start a new MCP server."""
+        async with self._lock:
+            self._servers[config.server_id] = MCPServerState(
+                server_id=config.server_id,
+                config=config,
+                status=MCPServerStatus.STOPPED,
+            )
+
+        if config.enabled:
+            await self._start_server(config.server_id)
+
+        return self._servers[config.server_id]
+
+    async def remove_server(self, server_id: str) -> None:
+        """Stop and remove a server."""
+        await self.stop_server(server_id)
+        async with self._lock:
+            self._servers.pop(server_id, None)
+
+    async def _start_server(self, server_id: str) -> None:
+        """Start an MCP server subprocess and discover its tools."""
+        state = self._servers.get(server_id)
+        if not state:
+            return
+
+        async with self._lock:
+            state.status = MCPServerStatus.STARTING
+            state.error_message = None
+
+        proc = MCPServerProcess(state.config)
+        try:
+            tools = await proc.start()
+            async with self._lock:
+                state.status = MCPServerStatus.RUNNING
+                state.tools = tools
+                state.pid = proc.process.pid if proc.process else None
+                self._processes[server_id] = proc
+
+            logger.info(
+                "MCP server started: %s (%s) — %d tools discovered",
+                state.config.name,
+                server_id,
+                len(tools),
+            )
+        except Exception as exc:
+            logger.error("Failed to start MCP server %s: %s", server_id, exc)
+            async with self._lock:
+                state.status = MCPServerStatus.ERROR
+                state.error_message = str(exc)
+            await proc.stop()
+
+    async def stop_server(self, server_id: str) -> None:
+        """Stop an MCP server subprocess."""
+        proc = self._processes.pop(server_id, None)
+        if proc:
+            await proc.stop()
+
+        state = self._servers.get(server_id)
+        if state:
+            async with self._lock:
+                state.status = MCPServerStatus.STOPPED
+                state.tools = []
+                state.pid = None
+
+    async def restart_server(self, server_id: str) -> MCPServerState | None:
+        """Restart an MCP server."""
+        await self.stop_server(server_id)
+        await self._start_server(server_id)
+        return self._servers.get(server_id)
+
+    async def call_tool(self, server_id: str, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """Invoke a tool on a running MCP server."""
+        proc = self._processes.get(server_id)
+        if not proc or not proc.is_running:
+            raise RuntimeError(f"MCP server '{server_id}' is not running")
+
+        return await proc.call_tool(tool_name, arguments)
+
+    def get_server(self, server_id: str) -> MCPServerState | None:
+        return self._servers.get(server_id)
+
+    def list_servers(self) -> list[MCPServerState]:
+        return list(self._servers.values())
+
+    def get_all_tools(self) -> list[dict[str, Any]]:
+        """Return all available tools across all running servers."""
+        tools = []
+        for state in self._servers.values():
+            if state.status == MCPServerStatus.RUNNING:
+                for tool in state.tools:
+                    tools.append({
+                        "server_id": state.server_id,
+                        "server_name": state.config.name,
+                        "tool_name": tool.name,
+                        "description": tool.description,
+                        "parameters": [p.model_dump() for p in tool.parameters],
+                        "input_schema": tool.input_schema,
+                    })
+        return tools
+
+    def find_tool(self, tool_name: str) -> tuple[str, MCPTool] | None:
+        """Find a tool by name across all running servers. Returns (server_id, tool) or None."""
+        for state in self._servers.values():
+            if state.status == MCPServerStatus.RUNNING:
+                for tool in state.tools:
+                    if tool.name == tool_name:
+                        return (state.server_id, tool)
+        return None
+
+    async def shutdown(self) -> None:
+        """Stop all running servers. Called during app shutdown."""
+        server_ids = list(self._processes.keys())
+        for sid in server_ids:
+            try:
+                await self.stop_server(sid)
+            except Exception:
+                logger.warning("Error stopping MCP server %s during shutdown", sid, exc_info=True)
+        logger.info("MCP manager shutdown complete — %d servers stopped", len(server_ids))
+
+
+# Singleton
+_manager: MCPManager | None = None
+
+
+def get_mcp_manager() -> MCPManager:
+    """Return the singleton MCPManager instance."""
+    global _manager
+    if _manager is None:
+        _manager = MCPManager()
+    return _manager
