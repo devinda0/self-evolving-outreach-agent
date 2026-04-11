@@ -7,6 +7,7 @@ export { default as ResearchProgress } from "../ResearchProgress";
 export { default as ClarificationPrompt } from "../ClarificationPrompt";
 export { default as SegmentSelector } from "../SegmentSelector";
 export { default as ProspectPicker } from "../ProspectPicker";
+export { default as ProspectManager } from "../ProspectManager";
 export { default as VariantGrid } from "../VariantGrid";
 export { default as VisualArtifact } from "../VisualArtifact";
 export { default as ChannelSelector } from "../ChannelSelector";

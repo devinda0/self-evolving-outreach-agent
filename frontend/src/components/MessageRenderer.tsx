@@ -5,6 +5,7 @@ import {
   BriefingCard,
   SegmentSelector,
   ProspectPicker,
+  ProspectManager,
   VariantGrid,
   ChannelSelector,
   DeploymentConfirm,
@@ -226,6 +227,8 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <SegmentSelector {...props} />;
     case "ProspectPicker":
       return <ProspectPicker {...props} />;
+    case "ProspectManager":
+      return <ProspectManager {...props} />;
     case "VariantGrid":
       return <VariantGrid {...props} />;
     case "VisualArtifact":

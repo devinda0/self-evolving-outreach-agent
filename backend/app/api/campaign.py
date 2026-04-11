@@ -48,6 +48,7 @@ _PROGRESS_NODES = frozenset(
         "research_thread",
         "research_synthesizer",
         "segment_agent",
+        "prospect_manage",
         "content_agent",
         "deployment_agent",
         "feedback_agent",
@@ -187,6 +188,7 @@ _NAVIGATE_INTENT_MAP: dict[str, str] = {
     "goto_segment": "segment",
     "goto_generate": "generate",
     "drill_deeper": "research",
+    "goto_prospect_manage": "prospect_manage",
 }
 
 
@@ -207,9 +209,13 @@ def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
     if action_id in ("cancel_deploy", "cancel_deployment"):
         return "Cancel the deployment"
 
-    # ProspectPicker confirm → generate content
+    # ProspectPicker / ProspectManager confirm → generate content
     if action_id == "confirm_prospects":
         return "Generate outreach content for the selected prospects"
+
+    # ProspectManager actions that need graph re-run
+    if action_id in ("add_prospect_manual", "remove_selected", "clear_selection", "select_all_prospects"):
+        return "Show me the current prospect list"
 
     # SegmentSelector pick → acknowledge segment selection
     if action_id == "select_segment":
@@ -228,6 +234,12 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
         return {"deployment_confirmed": False}
     if action_id == "confirm_prospects":
         return {"selected_prospect_ids": payload.get("selected_ids", [])}
+    if action_id in ("select_all_prospects",):
+        return {}  # handled by graph re-run
+    if action_id in ("clear_selection",):
+        return {"selected_prospect_ids": []}
+    if action_id in ("remove_selected",):
+        return {}  # handled by graph re-run
     if action_id == "select_segment":
         return {"selected_segment_id": payload.get("segment_id")}
     return {}
@@ -358,7 +370,7 @@ async def _run_graph_for_message(
                     else ""
                 )
                 # Skip nodes that produce structured JSON, not user-facing prose
-                if node in ("orchestrator", "clarify", "content_agent", "deployment_agent", "answer", "update_context"):
+                if node in ("orchestrator", "clarify", "content_agent", "deployment_agent", "answer", "update_context", "prospect_manage"):
                     continue
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:

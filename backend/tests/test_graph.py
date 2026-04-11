@@ -112,6 +112,7 @@ def test_build_graph_compiles():
         ("clarify", "clarify"),
         ("answer", "answer"),
         ("update_context", "update_context"),
+        ("prospect_manage", "prospect_manage"),
     ],
 )
 def test_route_from_orchestrator(next_node, expected):

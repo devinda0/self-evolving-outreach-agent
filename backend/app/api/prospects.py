@@ -1,10 +1,12 @@
-"""Prospect and segment API — CSV import, prospect discovery, retrieval, segment selection."""
+"""Prospect and segment API — CSV import, prospect discovery, retrieval, segment selection, manual management."""
 
 import logging
+import re
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.agents.prospect_discovery import (
     deduplicate_prospects,
@@ -47,6 +49,42 @@ class DiscoverProspectsRequest(BaseModel):
 
 class CsvImportOptions(BaseModel):
     column_mapping: dict[str, str] | None = None
+
+
+class AddProspectRequest(BaseModel):
+    name: str
+    email: str | None = None
+    title: str | None = None
+    company: str | None = None
+    linkedin_url: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Name is required")
+        if len(v) > 200:
+            raise ValueError("Name must be 200 characters or fewer")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        if not v:
+            return None
+        v = v.strip()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            raise ValueError("Invalid email format")
+        return v.lower()
+
+
+class RemoveProspectsRequest(BaseModel):
+    prospect_ids: list[str]
+
+
+class SelectProspectsRequest(BaseModel):
+    prospect_ids: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +263,100 @@ async def select_segment(session_id: str, req: SelectSegmentRequest) -> dict[str
 
     logger.info("Selected segment %s for session %s", req.segment_id, session_id)
     return {"selected_segment_id": req.segment_id}
+
+
+@router.post("/campaign/{session_id}/prospects/add")
+async def add_prospect(session_id: str, req: AddProspectRequest) -> dict[str, Any]:
+    """Add a single prospect manually to the session's prospect list."""
+    state = await load_campaign_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    existing_cards = await get_prospect_cards(session_id)
+
+    prospect_id = f"prospect-{uuid.uuid4().hex[:8]}"
+    new_prospect: dict[str, Any] = {
+        "id": prospect_id,
+        "name": req.name,
+        "email": req.email,
+        "linkedin_url": req.linkedin_url,
+        "title": req.title or "",
+        "company": req.company or "",
+        "fit_score": 0.75,
+        "urgency_score": 0.60,
+        "angle_recommendation": "value-proposition",
+        "channel_recommendation": "email" if req.email else "linkedin",
+        "personalization_fields": {},
+        "source": "manual",
+        "discovery_query": None,
+        "role_seniority": None,
+        "company_fit": None,
+        "signal_recency": None,
+    }
+
+    # Deduplicate
+    all_prospects = existing_cards + [new_prospect]
+    deduped = deduplicate_prospects(all_prospects)
+
+    await save_prospect_cards(session_id, deduped)
+
+    # Update state with the new cards
+    cards = [build_prospect_card(p) for p in deduped]
+    state["prospect_cards"] = cards
+    await save_campaign_state(session_id, state)
+
+    logger.info("Added prospect %s for session %s", req.name, session_id)
+    return {"prospect": build_prospect_card(new_prospect), "total": len(cards)}
+
+
+@router.post("/campaign/{session_id}/prospects/remove")
+async def remove_prospects(session_id: str, req: RemoveProspectsRequest) -> dict[str, Any]:
+    """Remove prospects by ID from the session's prospect list."""
+    state = await load_campaign_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    existing_cards = await get_prospect_cards(session_id)
+    ids_to_remove = set(req.prospect_ids)
+
+    updated = [c for c in existing_cards if c.get("id") not in ids_to_remove]
+    removed_count = len(existing_cards) - len(updated)
+
+    await save_prospect_cards(session_id, updated)
+
+    # Update state
+    cards = [build_prospect_card(p) for p in updated]
+    state["prospect_cards"] = cards
+    # Also remove from selected IDs
+    selected = state.get("selected_prospect_ids", [])
+    state["selected_prospect_ids"] = [s for s in selected if s not in ids_to_remove]
+    await save_campaign_state(session_id, state)
+
+    logger.info("Removed %d prospects for session %s", removed_count, session_id)
+    return {"removed": removed_count, "remaining": len(cards)}
+
+
+@router.post("/campaign/{session_id}/prospects/select")
+async def select_prospects(session_id: str, req: SelectProspectsRequest) -> dict[str, Any]:
+    """Set the selected prospect IDs for the session."""
+    state = await load_campaign_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Validate all IDs exist in the prospect list
+    existing_cards = await get_prospect_cards(session_id)
+    valid_ids = {c.get("id") for c in existing_cards}
+    invalid = [pid for pid in req.prospect_ids if pid not in valid_ids]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown prospect IDs: {invalid}",
+        )
+
+    state["selected_prospect_ids"] = req.prospect_ids
+    await save_campaign_state(session_id, state)
+
+    logger.info(
+        "Selected %d prospects for session %s", len(req.prospect_ids), session_id
+    )
+    return {"selected_ids": req.prospect_ids, "count": len(req.prospect_ids)}

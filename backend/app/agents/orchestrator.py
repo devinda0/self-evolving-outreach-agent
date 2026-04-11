@@ -32,6 +32,7 @@ VALID_INTENTS = frozenset(
     [
         "research",
         "segment",
+        "prospect_manage",
         "generate",
         "deploy",
         "feedback",
@@ -46,6 +47,7 @@ VALID_INTENTS = frozenset(
 INTENT_TO_NODE = {
     "research": "research",
     "segment": "segment",
+    "prospect_manage": "prospect_manage",
     "generate": "generate",
     "deploy": "deploy",
     "feedback": "feedback",
@@ -61,7 +63,8 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 
 ## Intent Modes
 - research: user wants market intelligence, competitor analysis, audience signals, channel trends
-- segment: user wants to define a target segment or select/score prospects
+- segment: user wants to define a target segment or select/score prospects (initial discovery)
+- prospect_manage: user wants to manage prospects — add/remove/edit individual prospects, upload CSV, view current prospect list, select specific prospects by name, clear prospects, or change who receives outreach. Use this when the user references specific people or asks to modify the prospect list AFTER initial discovery.
 - generate: user wants content created (outreach, social posts, briefs)
 - deploy: user wants to send content to a channel
 - feedback: user is reporting engagement results or a webhook event has arrived
@@ -74,6 +77,8 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - Read intent from full conversation context, not just latest message
 - "Now write three variants" after research → "generate"
 - "Go back to research" → override any prior intent immediately with "research"
+- "Send only to John" or "remove Alice from the list" or "add john@example.com" or "show me the prospects" or "upload a CSV" or "I only want to send to sarah@company.com" → "prospect_manage"
+- "who are we sending to?" or "show selected prospects" → "prospect_manage"
 - If user asks a direct question (e.g. "what is our target market?", "how many variants did we create?", "what should I focus on?") → "answer"
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
@@ -83,7 +88,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 
 ## Output format (strict JSON, no prose, no markdown code blocks)
 {
-  "current_intent": "<one of: research, segment, generate, deploy, feedback, refined_cycle, answer, update_context, clarify>",
+  "current_intent": "<one of: research, segment, prospect_manage, generate, deploy, feedback, refined_cycle, answer, update_context, clarify>",
   "reasoning": "<one sentence explaining your classification>",
   "clarification_question": "<only if current_intent=clarify, else null>",
   "clarification_options": ["<option1>", "<option2>", "..."],
@@ -92,10 +97,10 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 
 DEFAULT_CLARIFICATION = (
     "I didn't quite catch that — could you clarify what you'd like to do? "
-    "(research / segment / generate / deploy / feedback)"
+    "(research / segment / manage prospects / generate / deploy / feedback)"
 )
 
-DEFAULT_OPTIONS = ["Research competitors", "Generate content", "Deploy campaign", "Report feedback"]
+DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Generate content", "Deploy campaign", "Report feedback"]
 
 
 def _get_llm():

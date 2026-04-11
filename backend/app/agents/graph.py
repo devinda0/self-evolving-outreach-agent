@@ -21,6 +21,7 @@ from app.agents.orchestrator import (
     orchestrator_node,
     update_context_node,
 )
+from app.agents.prospect_manager import prospect_manage_node
 from app.agents.research import (
     research_dispatcher_node,
     research_synthesizer_node,
@@ -55,6 +56,7 @@ def route_from_orchestrator(state: CampaignState) -> str:
     if next_node in (
         "research",
         "segment",
+        "prospect_manage",
         "generate",
         "deploy",
         "feedback",
@@ -120,6 +122,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_node("research_thread", research_thread_node)
     builder.add_node("research_synthesizer", research_synthesizer_node)
     builder.add_node("segment_agent", segment_agent_node)
+    builder.add_node("prospect_manage", prospect_manage_node)
     builder.add_node("content_agent", content_agent_node)
     builder.add_node("deployment_agent", deployment_agent_node)
     builder.add_node("feedback_agent", feedback_agent_node)
@@ -140,6 +143,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
         {
             "research": "research_dispatcher",
             "segment": "segment_agent",
+            "prospect_manage": "prospect_manage",
             "generate": "content_agent",
             "deploy": "deployment_agent",
             "feedback": "feedback_agent",
@@ -159,6 +163,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
 
     # -- All specialist agents route to END; each user turn starts a fresh run from orchestrator --
     builder.add_edge("segment_agent", END)
+    builder.add_edge("prospect_manage", END)
     builder.add_edge("content_agent", END)
     builder.add_edge("deployment_agent", END)
     builder.add_edge("feedback_agent", END)

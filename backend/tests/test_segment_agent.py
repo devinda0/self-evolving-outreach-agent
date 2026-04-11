@@ -391,6 +391,11 @@ class TestSegmentAgentNodeUnit:
         with (
             patch("app.agents.segment_agent.save_segments", new_callable=AsyncMock),
             patch("app.agents.segment_agent.save_prospect_cards", new_callable=AsyncMock),
+            patch(
+                "app.agents.segment_agent.discover_prospects_via_research",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             result = await segment_agent_node(state)
 
@@ -418,6 +423,11 @@ class TestSegmentAgentNodeUnit:
         with (
             patch("app.agents.segment_agent.save_segments", new_callable=AsyncMock),
             patch("app.agents.segment_agent.save_prospect_cards", new_callable=AsyncMock),
+            patch(
+                "app.agents.segment_agent.discover_prospects_via_research",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             result = await segment_agent_node(state)
 

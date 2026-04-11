@@ -14,6 +14,7 @@ export { default as VisualArtifact } from "./VisualArtifact";
 export {
   SegmentSelector,
   ProspectPicker,
+  ProspectManager,
   VariantGrid,
   ChannelSelector,
   ErrorCard,
