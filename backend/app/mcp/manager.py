@@ -387,9 +387,24 @@ class MCPSSEServerProcess:
                         if event_type == "endpoint":
                             msg_url = data_str
                             if msg_url.startswith("/"):
-                                from urllib.parse import urlparse
-                                parsed = urlparse(self._base_url)
-                                self._message_url = f"{parsed.scheme}://{parsed.netloc}{msg_url}"
+                                from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+                                base = urlparse(self._base_url)
+                                msg_parsed = urlparse(msg_url)
+                                # Merge base query params (auth token, groups, etc.)
+                                # into the message URL so auth is preserved.
+                                base_params = parse_qs(base.query, keep_blank_values=True)
+                                msg_params = parse_qs(msg_parsed.query, keep_blank_values=True)
+                                # Message URL params take precedence (e.g. sessionId)
+                                merged = {**base_params, **msg_params}
+                                merged_query = urlencode(merged, doseq=True)
+                                self._message_url = urlunparse((
+                                    base.scheme,
+                                    base.netloc,
+                                    msg_parsed.path,
+                                    msg_parsed.params,
+                                    merged_query,
+                                    msg_parsed.fragment,
+                                ))
                             else:
                                 self._message_url = msg_url
                             self._sse_connected.set()
