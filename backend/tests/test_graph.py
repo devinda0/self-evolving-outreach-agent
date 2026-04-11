@@ -325,8 +325,8 @@ async def test_deployment_agent_node_sends_when_confirmed():
         ],
         selected_variant_ids=["v1", "v2"],
         prospect_cards=[
-            {"id": "p1", "name": "Jane Doe", "company": "Acme Corp"},
-            {"id": "p2", "name": "Bob Smith", "company": "WidgetCo"},
+            {"id": "p1", "name": "Jane Doe", "company": "Acme Corp", "email": "jane@acme.com"},
+            {"id": "p2", "name": "Bob Smith", "company": "widgetco.com", "email": "bob@widgetco.com"},
         ],
         selected_prospect_ids=["p1", "p2"],
     )

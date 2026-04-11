@@ -792,7 +792,7 @@ async def content_agent_node(state: CampaignState) -> dict:
 
     personalization_note = ""
     if personalized_count > 0:
-        personalization_note = f", each personalized for a specific prospect"
+        personalization_note = ", each personalized for a specific prospect"
 
     response_message = (
         f"Content generation complete{directive_note}. "

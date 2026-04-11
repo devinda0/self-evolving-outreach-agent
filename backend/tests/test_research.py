@@ -311,7 +311,9 @@ class TestResearchSynthesizer:
         assert "research_gaps" in result
         assert "pending_ui_frames" in result
 
-        frame = result["pending_ui_frames"][0]
+        # pending_ui_frames = [MessageRenderer (response), BriefingCard]
+        assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+        frame = result["pending_ui_frames"][1]
         assert frame["component"] == "BriefingCard"
         assert frame["props"]["finding_count"] == 2
         assert len(frame["actions"]) == 3
