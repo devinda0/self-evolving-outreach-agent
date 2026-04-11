@@ -255,7 +255,7 @@ class TestScoreProspects:
         prospects = [_make_prospect()]
         findings = _make_findings(3)
 
-        scored = await score_prospects(prospects, segments, findings)
+        scored = await score_prospects(prospects, segments, findings, target_market="B2B SaaS")
 
         assert len(scored) == 1
         p = scored[0]
@@ -270,12 +270,12 @@ class TestScoreProspects:
     async def test_sorted_by_combined_score(self):
         segments = [_make_segment()]
         prospects = [
-            _make_prospect(name="Junior", title="Junior Analyst"),
-            _make_prospect(name="VP", title="VP Sales"),
+            _make_prospect(name="Junior", title="Junior Analyst", email="junior@test.com"),
+            _make_prospect(name="VP", title="VP Sales", email="vp@test.com"),
         ]
         findings = _make_findings(3)
 
-        scored = await score_prospects(prospects, segments, findings)
+        scored = await score_prospects(prospects, segments, findings, target_market="B2B SaaS")
 
         # VP Sales should score higher and appear first
         assert scored[0]["name"] == "VP"
@@ -284,7 +284,7 @@ class TestScoreProspects:
         segments = [_make_segment()]
         findings = _make_findings(3)
 
-        scored = await score_prospects(DEMO_SEED_PROSPECTS, segments, findings)
+        scored = await score_prospects(DEMO_SEED_PROSPECTS, segments, findings, target_market="B2B SaaS")
 
         assert len(scored) == len(DEMO_SEED_PROSPECTS)
         for p in scored:

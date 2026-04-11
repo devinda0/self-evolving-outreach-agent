@@ -2,10 +2,11 @@
 
 This agent sits between research and content. It:
 1. Derives target segment candidates from the briefing summary and top research findings
-2. Loads prospects from a CSV file, demo seed list, or manual entry
-3. Scores each prospect against segments using fit and urgency heuristics
-4. Builds compact prospect cards for the ProspectPicker UI
-5. Emits SegmentSelector + ProspectPicker UI frames
+2. Discovers prospects via research-powered queries or loads from CSV / manual entry
+3. Scores each prospect using a weighted multi-signal model
+4. Deduplicates prospects across multiple import sources
+5. Builds compact prospect cards for the ProspectPicker UI
+6. Emits SegmentSelector + ProspectPicker UI frames
 """
 
 import csv
@@ -15,6 +16,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from app.agents.prospect_discovery import (
+    calculate_weighted_fit_score,
+    deduplicate_prospects,
+    discover_prospects_via_research,
+    load_prospects_from_csv_with_mapping,
+)
 from app.db.crud import save_prospect_cards, save_segments
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
@@ -107,17 +114,42 @@ DEMO_SEED_PROSPECTS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 
-async def load_prospects(prospect_pool_ref: str | None) -> list[dict[str, Any]]:
-    """Load prospects from the referenced source, falling back to the demo seed list."""
-    if not prospect_pool_ref:
-        logger.info("No prospect source provided — using demo seed list")
-        return DEMO_SEED_PROSPECTS
+async def load_prospects(
+    prospect_pool_ref: str | None,
+    research_findings: list[dict[str, Any]] | None = None,
+    product_name: str = "",
+    target_market: str = "",
+) -> list[dict[str, Any]]:
+    """Load prospects from the referenced source.
 
-    ref_path = Path(prospect_pool_ref)
-    if ref_path.suffix.lower() == ".csv" and ref_path.is_file():
-        return await load_prospects_from_csv(str(ref_path))
+    Priority:
+    1. CSV file path → load from CSV with auto column mapping
+    2. Research-powered discovery → if research findings are available
+    3. Demo seed list → fallback when no other source is available
+    """
+    if prospect_pool_ref:
+        ref_path = Path(prospect_pool_ref)
+        if ref_path.suffix.lower() == ".csv" and ref_path.is_file():
+            return await load_prospects_from_csv(str(ref_path))
+        logger.warning("Unrecognized prospect_pool_ref '%s'", prospect_pool_ref)
 
-    logger.warning("Unrecognized prospect_pool_ref '%s' — using demo seed list", prospect_pool_ref)
+    # Try research-powered discovery when findings are available
+    if research_findings:
+        logger.info("Attempting research-powered prospect discovery")
+        try:
+            discovered = await discover_prospects_via_research(
+                product_name=product_name,
+                target_market=target_market,
+                research_findings=research_findings,
+                num_prospects=10,
+            )
+            if discovered:
+                logger.info("Discovered %d prospects via research", len(discovered))
+                return discovered
+        except Exception as exc:
+            logger.warning("Prospect discovery failed (%s) — falling back to seed list", exc)
+
+    logger.info("Using demo seed list as fallback")
     return DEMO_SEED_PROSPECTS
 
 
@@ -284,6 +316,7 @@ def calculate_fit_score(prospect: dict[str, Any], segment: Segment) -> float:
     """Calculate how well a prospect fits the segment criteria.
 
     Uses heuristic matching on title, company, and segment criteria.
+    Kept for backward compatibility — new code uses calculate_weighted_fit_score.
     """
     score = 0.5  # Base score
 
@@ -362,17 +395,22 @@ async def score_prospects(
     prospects: list[dict[str, Any]],
     segments: list[Segment],
     top_findings: list[dict[str, Any]],
+    target_market: str = "",
 ) -> list[dict[str, Any]]:
-    """Score every prospect against the first (primary) segment.
+    """Score every prospect using the weighted multi-signal model.
 
-    Returns enriched prospect dicts with scores and recommendations.
+    Returns enriched prospect dicts with scores, component breakdowns, and recommendations.
     """
     primary_segment = segments[0] if segments else None
     scored: list[dict[str, Any]] = []
 
     for raw in prospects:
         prospect_id = f"prospect-{uuid.uuid4().hex[:8]}"
-        fit = calculate_fit_score(raw, primary_segment) if primary_segment else 0.5
+
+        # Use weighted scoring model
+        fit, components = calculate_weighted_fit_score(
+            raw, primary_segment, top_findings, target_market
+        )
         urgency = calculate_urgency_score(raw, top_findings)
         angle = recommend_angle(raw, top_findings)
         channel = recommend_channel(raw, primary_segment) if primary_segment else "email"
@@ -390,11 +428,20 @@ async def score_prospects(
                 "angle_recommendation": angle,
                 "channel_recommendation": channel,
                 "personalization_fields": {},
+                "source": raw.get("source", "seed"),
+                "discovery_query": raw.get("rationale"),
+                "role_seniority": components.get("role_seniority"),
+                "company_fit": components.get("company_fit"),
+                "signal_recency": components.get("signal_recency"),
             }
         )
 
     # Sort by combined score (fit + urgency) descending
     scored.sort(key=lambda p: p["fit_score"] + p["urgency_score"], reverse=True)
+
+    # Deduplicate after scoring
+    scored = deduplicate_prospects(scored)
+
     return scored
 
 
@@ -503,14 +550,20 @@ async def segment_agent_node(state: CampaignState) -> dict:
     for seg in segments:
         seg.session_id = session_id
 
-    # Step 2: Load prospects (CSV / seed list)
-    raw_prospects = await load_prospects(state.get("prospect_pool_ref"))
+    # Step 2: Load prospects (discovery / CSV / seed list)
+    raw_prospects = await load_prospects(
+        prospect_pool_ref=state.get("prospect_pool_ref"),
+        research_findings=state.get("research_findings", []),
+        product_name=state.get("product_name", "Unknown Product"),
+        target_market=state.get("target_market", ""),
+    )
 
-    # Step 3: Score each prospect against segments
+    # Step 3: Score each prospect using weighted model
     scored = await score_prospects(
         prospects=raw_prospects,
         segments=segments,
         top_findings=top_findings,
+        target_market=state.get("target_market", ""),
     )
 
     # Step 4: Build compact prospect cards

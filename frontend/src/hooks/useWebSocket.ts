@@ -30,6 +30,17 @@ export function useWebSocket(sessionId: string | null) {
           store.addUIFrame(frame as unknown as Parameters<typeof store.addUIFrame>[0]);
           store.setPendingAction(false);
           break;
+        case "text": {
+          // Text frames from answer_node / update_context_node carry the
+          // LLM response in props.content — render as a regular assistant message.
+          const props = (frame as Record<string, unknown>).props as Record<string, unknown> | undefined;
+          const content = props?.content;
+          if (typeof content === "string" && content) {
+            store.appendToken(content);
+          }
+          store.setPendingAction(false);
+          break;
+        }
         case "progress":
           store.setCurrentStage((frame.stage as string) ?? null);
           store.setPendingAction(false);

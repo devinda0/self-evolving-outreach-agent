@@ -1,6 +1,6 @@
 """Prospect and segment models."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,11 @@ class Prospect(BaseModel):
     angle_recommendation: str
     channel_recommendation: str
     personalization_fields: dict
+    source: Literal["seed", "csv", "discovery", "manual"] = "seed"
+    discovery_query: Optional[str] = None
+    role_seniority: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    company_fit: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    signal_recency: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class Segment(BaseModel):
