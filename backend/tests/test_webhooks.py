@@ -64,6 +64,7 @@ class TestVerifyResendSignature:
 class TestInjectCanSpamFooter:
     def test_appends_footer_with_unsubscribe_and_address(self):
         from unittest.mock import patch
+
         from app.tools.resend_client import inject_can_spam_footer
 
         with patch("app.tools.resend_client.settings") as mock_settings:
@@ -77,6 +78,7 @@ class TestInjectCanSpamFooter:
 
     def test_inserts_before_body_close_tag(self):
         from unittest.mock import patch
+
         from app.tools.resend_client import inject_can_spam_footer
 
         with patch("app.tools.resend_client.settings") as mock_settings:
@@ -91,6 +93,7 @@ class TestInjectCanSpamFooter:
 
     def test_no_config_returns_original(self):
         from unittest.mock import patch
+
         from app.tools.resend_client import inject_can_spam_footer
 
         with patch("app.tools.resend_client.settings") as mock_settings:
@@ -102,6 +105,7 @@ class TestInjectCanSpamFooter:
 
     def test_only_physical_address(self):
         from unittest.mock import patch
+
         from app.tools.resend_client import inject_can_spam_footer
 
         with patch("app.tools.resend_client.settings") as mock_settings:

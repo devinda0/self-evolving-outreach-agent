@@ -225,7 +225,7 @@ def _extract_last_user_message(messages: list[Any]) -> str:
     return ""
 
 
-def _get_selected_prospects(state: dict) -> list[dict]:
+def _get_selected_prospects(state: CampaignState) -> list[dict]:
     """Get the target prospects for personalized content generation.
 
     Priority: selected_prospect_ids → all prospect_cards → empty list.
