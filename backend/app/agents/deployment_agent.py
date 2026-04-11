@@ -98,6 +98,29 @@ def personalize_variant_html(variant: dict, prospect: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def check_production_readiness() -> list[str]:
+    """Validate config required for real email sends.
+
+    Returns a list of human-readable error strings. Empty list means production
+    mode is safe to use.
+    """
+    errors: list[str] = []
+    if not settings.RESEND_API_KEY:
+        errors.append("RESEND_API_KEY is not set — cannot send real emails.")
+    if (
+        not settings.RESEND_FROM_EMAIL
+        or settings.RESEND_FROM_EMAIL == "outreach@yourdomain.com"
+    ):
+        errors.append(
+            "RESEND_FROM_EMAIL is still the default placeholder — set a verified sender address."
+        )
+    if not settings.UNSUBSCRIBE_URL:
+        errors.append("UNSUBSCRIBE_URL is not configured — required for CAN-SPAM compliance.")
+    if not settings.PHYSICAL_ADDRESS:
+        errors.append("PHYSICAL_ADDRESS is not configured — required for CAN-SPAM compliance.")
+    return errors
+
+
 async def mock_send(channel: str, prospect: dict, content: str) -> str:
     """Simulate a send. Returns a fake provider_message_id.
 
@@ -128,6 +151,7 @@ async def send_via_email(variant: dict, prospect: dict, session_id: str) -> str:
             "variant_id": variant["id"],
             "prospect_id": prospect["id"],
         },
+        session_id=session_id,
     )
     return result["id"]  # provider_message_id for webhook correlation
 
@@ -340,6 +364,26 @@ async def deployment_agent_node(state: CampaignState) -> dict:
 
     # -- If not yet confirmed, emit DeploymentConfirm and wait --
     if not state.get("deployment_confirmed"):
+        # Pre-flight: warn if production mode is misconfigured
+        production_errors: list[str] = []
+        if not settings.USE_MOCK_SEND:
+            production_errors = check_production_readiness()
+            if production_errors:
+                logger.error(
+                    "deployment_agent_node: production readiness check failed | session=%s errors=%s",
+                    session_id,
+                    production_errors,
+                )
+                return {
+                    "next_node": "orchestrator",
+                    "session_complete": True,
+                    "error_messages": [
+                        "Production email sending is enabled but configuration is incomplete:",
+                        *production_errors,
+                        "Set USE_MOCK_SEND=true to use mock mode, or fix the issues above.",
+                    ],
+                }
+
         ab_plan = build_ab_split_plan(selected_variants, selected_prospects)
         confirm_frame = build_deployment_confirm_frame(
             selected_variants,

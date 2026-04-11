@@ -18,8 +18,10 @@ from app.db.crud import (
     get_feedback_event_by_dedupe_key,
     get_feedback_events_for_session,
     get_quarantine_events_for_session,
+    save_dlq_event,
     save_feedback_event,
     save_quarantine_event,
+    update_dlq_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -238,6 +240,77 @@ async def get_session_feedback_events(session_id: str) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Engagement dashboard
+# ---------------------------------------------------------------------------
+
+
+@router.get("/campaign/{session_id}/engagement")
+async def get_engagement_dashboard(session_id: str) -> dict[str, Any]:
+    """Return a comprehensive engagement dashboard for a campaign session.
+
+    Includes:
+    - Per-variant metrics (open/click/reply/bounce rates)
+    - Statistical significance testing results
+    - Winner determination
+    - Deployment summary
+    """
+    from app.agents.feedback_agent import (
+        aggregate_engagement_results,
+        compute_ab_significance,
+        determine_winner,
+    )
+    from app.db.crud import get_deployment_records_for_session
+
+    events = await get_feedback_events_for_session(session_id)
+    records = await get_deployment_records_for_session(session_id)
+
+    if not records:
+        return {
+            "session_id": session_id,
+            "total_sent": 0,
+            "total_failed": 0,
+            "variant_metrics": [],
+            "winner": None,
+            "significance": None,
+            "deployment_summary": {"channels": {}},
+        }
+
+    # Compute metrics
+    results = aggregate_engagement_results(events, records)
+    winner = determine_winner(results)
+    significance = compute_ab_significance(results, metric="replies")
+
+    # Deployment summary
+    total_sent = sum(1 for r in records if r.get("status") == "sent")
+    total_failed = sum(1 for r in records if r.get("status") == "failed")
+    channels: dict[str, dict] = {}
+    for r in records:
+        ch = r.get("channel", "unknown")
+        if ch not in channels:
+            channels[ch] = {"sent": 0, "failed": 0}
+        if r.get("status") == "sent":
+            channels[ch]["sent"] += 1
+        else:
+            channels[ch]["failed"] += 1
+
+    return {
+        "session_id": session_id,
+        "total_sent": total_sent,
+        "total_failed": total_failed,
+        "total_events": len(events),
+        "variant_metrics": results,
+        "winner": {
+            "variant_id": winner["variant_id"],
+            "reply_rate": winner["reply_rate"],
+            "open_rate": winner["open_rate"],
+            "sent": winner["sent"],
+        } if winner else None,
+        "significance": significance,
+        "deployment_summary": {"channels": channels},
+    }
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -255,6 +328,7 @@ async def _ingest_event(
     """Deduplicate, correlate to a deployment record, and store.
 
     Events that cannot be correlated are quarantined.
+    Processing failures are sent to the dead-letter queue for retry.
     """
     # 1. Deduplicate
     existing = await get_feedback_event_by_dedupe_key(dedupe_key)
@@ -264,33 +338,50 @@ async def _ingest_event(
 
     now = datetime.now(tz=timezone.utc)
 
-    # 2. Correlate to deployment record
-    deployment: dict[str, Any] | None = None
-    if provider_message_id:
-        deployment = await get_deployment_by_provider_message_id(provider_message_id)
+    try:
+        # 2. Correlate to deployment record
+        deployment: dict[str, Any] | None = None
+        if provider_message_id:
+            deployment = await get_deployment_by_provider_message_id(provider_message_id)
 
-    normalized: dict[str, Any] = {
-        "provider": provider,
-        "provider_event_id": provider_event_id or None,
-        "provider_message_id": provider_message_id,
-        "deployment_record_id": deployment.get("id") if deployment else None,
-        "session_id": (deployment.get("session_id") if deployment else extra.get("session_id")),
-        "variant_id": deployment.get("variant_id") if deployment else None,
-        "prospect_id": deployment.get("prospect_id") if deployment else None,
-        "channel": deployment.get("channel") if deployment else channel,
-        "event_type": event_type,
-        "event_value": extra.get("event_value"),
-        "qualitative_signal": extra.get("qualitative_signal"),
-        "received_at": now.isoformat(),
-        "dedupe_key": dedupe_key,
-    }
+        normalized: dict[str, Any] = {
+            "provider": provider,
+            "provider_event_id": provider_event_id or None,
+            "provider_message_id": provider_message_id,
+            "deployment_record_id": deployment.get("id") if deployment else None,
+            "session_id": (deployment.get("session_id") if deployment else extra.get("session_id")),
+            "variant_id": deployment.get("variant_id") if deployment else None,
+            "prospect_id": deployment.get("prospect_id") if deployment else None,
+            "channel": deployment.get("channel") if deployment else channel,
+            "event_type": event_type,
+            "event_value": extra.get("event_value"),
+            "qualitative_signal": extra.get("qualitative_signal"),
+            "received_at": now.isoformat(),
+            "dedupe_key": dedupe_key,
+        }
 
-    if deployment:
-        await save_feedback_event(normalized)
-        logger.info("Stored feedback event: %s", dedupe_key)
-    else:
-        await save_quarantine_event(normalized)
-        logger.warning("Quarantined unmatched event: %s", dedupe_key)
+        if deployment:
+            await save_feedback_event(normalized)
+            logger.info("Stored feedback event: %s", dedupe_key)
+        else:
+            await save_quarantine_event(normalized)
+            logger.warning("Quarantined unmatched event: %s", dedupe_key)
+    except Exception as exc:
+        logger.error("_ingest_event failed for %s: %s — sending to DLQ", dedupe_key, exc)
+        await save_dlq_event({
+            "dedupe_key": dedupe_key,
+            "provider": provider,
+            "provider_message_id": provider_message_id,
+            "provider_event_id": provider_event_id,
+            "event_type": event_type,
+            "channel": channel,
+            "raw_payload": extra,
+            "error": str(exc),
+            "retry_count": 0,
+            "max_retries": settings.WEBHOOK_DLQ_MAX_RETRIES,
+            "status": "pending",
+            "created_at": now.isoformat(),
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -364,3 +455,61 @@ async def get_quarantine_events(session_id: str) -> list[dict[str, Any]]:
     """Return all quarantined events for a session, ordered by received_at."""
     events = await get_quarantine_events_for_session(session_id)
     return events
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter queue management
+# ---------------------------------------------------------------------------
+
+
+@router.post("/webhooks/dlq/retry")
+async def retry_dlq_events() -> dict[str, Any]:
+    """Retry all pending dead-letter queue events.
+
+    For each pending DLQ event, re-attempts ingestion. On success, marks the
+    event as ``resolved``. On repeated failure, increments retry_count and
+    marks as ``failed`` once max_retries is exceeded.
+    """
+    from app.db.crud import get_dlq_events
+
+    pending = await get_dlq_events(status="pending")
+    retried = 0
+    resolved = 0
+    failed = 0
+
+    for dlq_event in pending:
+        dedupe_key = dlq_event.get("dedupe_key", "")
+        retry_count = dlq_event.get("retry_count", 0)
+        max_retries = dlq_event.get("max_retries", settings.WEBHOOK_DLQ_MAX_RETRIES)
+
+        try:
+            await _ingest_event(
+                provider=dlq_event.get("provider", "unknown"),
+                provider_message_id=dlq_event.get("provider_message_id"),
+                provider_event_id=dlq_event.get("provider_event_id"),
+                event_type=dlq_event.get("event_type", "sent"),
+                dedupe_key=dedupe_key,
+                channel=dlq_event.get("channel", "unknown"),
+                extra=dlq_event.get("raw_payload", {}),
+            )
+            await update_dlq_event(dedupe_key, {
+                "status": "resolved",
+                "resolved_at": datetime.now(tz=timezone.utc).isoformat(),
+            })
+            resolved += 1
+        except Exception as exc:
+            new_count = retry_count + 1
+            new_status = "failed" if new_count >= max_retries else "pending"
+            await update_dlq_event(dedupe_key, {
+                "retry_count": new_count,
+                "status": new_status,
+                "last_error": str(exc),
+                "last_retry_at": datetime.now(tz=timezone.utc).isoformat(),
+            })
+            if new_status == "failed":
+                failed += 1
+            logger.warning("DLQ retry failed for %s (attempt %d/%d): %s",
+                           dedupe_key, new_count, max_retries, exc)
+        retried += 1
+
+    return {"retried": retried, "resolved": resolved, "failed": failed}

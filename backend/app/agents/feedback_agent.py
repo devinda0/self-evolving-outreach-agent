@@ -3,6 +3,8 @@
 Handles:
 - Aggregating normalized engagement events by variant/segment/channel
 - Determining the winning variant (minimum sample size guard)
+- Statistical significance testing (chi-squared) for A/B variant comparison
+- Automatic winner declaration when significance threshold is met
 - Updating research finding confidence scores in MongoDB
 - Writing an IntelligenceEntry (learning_delta) to close the feedback loop
 - Quarantining unmatched events that cannot be correlated to a deployment record
@@ -11,6 +13,7 @@ Handles:
 """
 
 import logging
+import math
 from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -125,6 +128,154 @@ def determine_winner(
 
 
 # ---------------------------------------------------------------------------
+# Statistical significance testing (chi-squared)
+# ---------------------------------------------------------------------------
+
+# Critical value for chi-squared with 1 degree of freedom at p < 0.05
+_CHI2_CRITICAL_005 = 3.841
+
+
+def _chi_squared_2x2(
+    successes_a: int, total_a: int, successes_b: int, total_b: int
+) -> float:
+    """Compute the chi-squared statistic for a 2×2 contingency table.
+
+    Layout:
+        |            | Success | Failure |
+        | Variant A  | s_a     | f_a     |
+        | Variant B  | s_b     | f_b     |
+
+    Uses Yates' continuity correction to improve accuracy for small samples.
+    Returns 0.0 when the expected frequency in any cell is zero.
+    """
+    f_a = total_a - successes_a
+    f_b = total_b - successes_b
+    n = total_a + total_b
+    if n == 0:
+        return 0.0
+
+    # Expected values for each cell
+    row_sums = [total_a, total_b]
+    col_sums = [successes_a + successes_b, f_a + f_b]
+
+    # Guard against zero expected frequencies
+    for rs in row_sums:
+        for cs in col_sums:
+            if rs * cs == 0:
+                return 0.0
+
+    # Yates-corrected chi-squared
+    observed = [[successes_a, f_a], [successes_b, f_b]]
+    chi2 = 0.0
+    for i in range(2):
+        for j in range(2):
+            expected = row_sums[i] * col_sums[j] / n
+            if expected == 0:
+                return 0.0
+            diff = abs(observed[i][j] - expected) - 0.5  # Yates correction
+            if diff < 0:
+                diff = 0.0
+            chi2 += (diff ** 2) / expected
+    return chi2
+
+
+def compute_ab_significance(
+    results: list[dict],
+    metric: str = "replies",
+    min_sample_size: int = MIN_SAMPLE_SIZE,
+) -> dict:
+    """Compute pairwise chi-squared significance between variants.
+
+    Args:
+        results: Aggregated variant results from ``aggregate_engagement_results``.
+        metric: Which metric to test (``"replies"``, ``"opens"``, ``"clicks"``).
+        min_sample_size: Minimum sends per variant to be included.
+
+    Returns:
+        A dict with:
+        - ``comparisons``: List of pairwise comparison dicts with chi2, significant, and effect_size.
+        - ``winner_id``: Variant ID of the statistically significant winner, or None.
+        - ``is_significant``: Whether any comparison reached significance.
+        - ``recommendation``: Human-readable recommendation.
+    """
+    qualified = [r for r in results if r.get("sent", 0) >= min_sample_size]
+    if len(qualified) < 2:
+        return {
+            "comparisons": [],
+            "winner_id": None,
+            "is_significant": False,
+            "recommendation": (
+                "Insufficient data for significance testing. "
+                f"Need at least 2 variants with {min_sample_size}+ sends each."
+            ),
+        }
+
+    comparisons = []
+    for i in range(len(qualified)):
+        for j in range(i + 1, len(qualified)):
+            a = qualified[i]
+            b = qualified[j]
+            s_a = a.get(metric, 0)
+            s_b = b.get(metric, 0)
+            t_a = a.get("sent", 0)
+            t_b = b.get("sent", 0)
+
+            chi2 = _chi_squared_2x2(s_a, t_a, s_b, t_b)
+            is_sig = chi2 >= _CHI2_CRITICAL_005
+
+            # Effect size (difference in rates)
+            rate_a = s_a / t_a if t_a else 0.0
+            rate_b = s_b / t_b if t_b else 0.0
+
+            comparisons.append({
+                "variant_a": a["variant_id"],
+                "variant_b": b["variant_id"],
+                "metric": metric,
+                "rate_a": round(rate_a, 4),
+                "rate_b": round(rate_b, 4),
+                "chi_squared": round(chi2, 4),
+                "significant": is_sig,
+                "effect_size": round(abs(rate_a - rate_b), 4),
+            })
+
+    any_significant = any(c["significant"] for c in comparisons)
+
+    # Determine winner: variant with best rate among significant comparisons
+    winner_id = None
+    if any_significant:
+        # Find the best performer among all significant comparisons
+        best_rate = -1.0
+        for comp in comparisons:
+            if comp["significant"]:
+                if comp["rate_a"] > best_rate:
+                    best_rate = comp["rate_a"]
+                    winner_id = comp["variant_a"]
+                if comp["rate_b"] > best_rate:
+                    best_rate = comp["rate_b"]
+                    winner_id = comp["variant_b"]
+
+    if winner_id:
+        recommendation = (
+            f"Variant {winner_id} is the statistically significant winner "
+            f"(p < 0.05, chi-squared test). Consider promoting this variant."
+        )
+    elif any_significant:
+        recommendation = "Significant differences detected but no clear single winner."
+    else:
+        recommendation = (
+            "No statistically significant difference between variants yet. "
+            "Continue collecting data."
+        )
+
+    return {
+        "comparisons": comparisons,
+        "winner_id": winner_id,
+        "is_significant": any_significant,
+        "recommendation": recommendation,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Confidence updates
 # ---------------------------------------------------------------------------
 
@@ -193,6 +344,7 @@ def compute_confidence_updates(
 def summarize_learning(
     results: list[dict],
     winner: dict | None,
+    significance: dict | None = None,
 ) -> str:
     """Produce a compact human-readable learning_delta text."""
     if not results:
@@ -213,6 +365,18 @@ def summarize_learning(
         )
     else:
         summary += "\n\nNo winner declared — insufficient sample size."
+
+    if significance:
+        summary += f"\n\nStatistical significance: {significance['recommendation']}"
+        if significance.get("comparisons"):
+            for comp in significance["comparisons"]:
+                sig_label = "SIGNIFICANT" if comp["significant"] else "not significant"
+                summary += (
+                    f"\n  {comp['variant_a']} vs {comp['variant_b']}: "
+                    f"chi²={comp['chi_squared']:.3f} ({sig_label}), "
+                    f"effect_size={comp['effect_size']:.1%}"
+                )
+
     return summary
 
 
@@ -250,6 +414,7 @@ def build_ab_results_frame(
     results: list[dict],
     winner: dict | None,
     instance_id: str,
+    significance: dict | None = None,
 ) -> dict:
     """Build an ABResults UI frame showing per-variant engagement metrics."""
     return UIFrame(
@@ -259,6 +424,7 @@ def build_ab_results_frame(
         props={
             "results": results,
             "winner_variant_id": winner["variant_id"] if winner else None,
+            "significance": significance,
         },
         actions=[
             UIAction(
@@ -432,6 +598,25 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     # -- Step 3: Determine winner --
     winner = determine_winner(results, min_sample_size=MIN_SAMPLE_SIZE)
 
+    # -- Step 3b: Statistical significance testing --
+    significance = compute_ab_significance(results, metric="replies", min_sample_size=MIN_SAMPLE_SIZE)
+    if significance.get("is_significant") and significance.get("winner_id"):
+        # Override winner with statistically significant winner if different
+        sig_winner = next(
+            (r for r in results if r["variant_id"] == significance["winner_id"]), None
+        )
+        if sig_winner:
+            winner = sig_winner
+            logger.info(
+                "feedback_agent_node: statistically significant winner=%s",
+                significance["winner_id"],
+            )
+    logger.info(
+        "feedback_agent_node: significance test — significant=%s winner=%s",
+        significance.get("is_significant"),
+        significance.get("winner_id"),
+    )
+
     # -- Step 4: Compute and persist confidence updates --
     confidence_updates: list[dict] = []
     try:
@@ -444,7 +629,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         logger.error("feedback_agent_node: confidence update step failed: %s", exc)
 
     # -- Step 5: Build and save learning delta --
-    learning_delta = summarize_learning(results, winner)
+    learning_delta = summarize_learning(results, winner, significance)
     entry = IntelligenceEntry(
         id=str(uuid4()),
         session_id=session_id,
@@ -462,7 +647,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
 
     # -- Step 6: Build UI frames --
     run_id = uuid4().hex[:8]
-    ab_frame = build_ab_results_frame(results, winner, f"ab-results-{run_id}")
+    ab_frame = build_ab_results_frame(results, winner, f"ab-results-{run_id}", significance)
     summary_frame = build_cycle_summary_frame(
         learning_delta, winner, cycle_number, f"cycle-summary-{run_id}"
     )
@@ -470,6 +655,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     return {
         "engagement_results": results,
         "winning_variant_id": winner["variant_id"] if winner else None,
+        "ab_significance": significance,
         "prior_cycle_summary": learning_delta,
         "cycle_number": cycle_number + 1,
         "next_node": "orchestrator",

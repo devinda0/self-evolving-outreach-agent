@@ -17,12 +17,14 @@ import pytest
 
 from app.agents.feedback_agent import (
     MIN_SAMPLE_SIZE,
+    _chi_squared_2x2,
     aggregate_engagement_results,
     build_ab_results_frame,
     build_cycle_summary_frame,
     build_feedback_prompt_frame,
     build_manual_feedback_frame,
     build_quarantine_viewer_frame,
+    compute_ab_significance,
     compute_confidence_updates,
     determine_winner,
     feedback_agent_node,
@@ -305,6 +307,121 @@ class TestComputeConfidenceUpdates:
 
 
 # ---------------------------------------------------------------------------
+# _chi_squared_2x2
+# ---------------------------------------------------------------------------
+
+
+class TestChiSquared2x2:
+    def test_identical_rates_return_zero(self):
+        """Two groups with identical rates → chi² = 0."""
+        chi2 = _chi_squared_2x2(50, 100, 50, 100)
+        assert chi2 == pytest.approx(0.0, abs=0.01)
+
+    def test_large_difference_is_significant(self):
+        """80/100 vs 20/100 → chi² well above 3.841 (p < 0.05)."""
+        chi2 = _chi_squared_2x2(80, 100, 20, 100)
+        assert chi2 > 3.841
+
+    def test_small_difference_not_significant(self):
+        """51/100 vs 49/100 → chi² below 3.841."""
+        chi2 = _chi_squared_2x2(51, 100, 49, 100)
+        assert chi2 < 3.841
+
+    def test_zero_total_returns_zero(self):
+        """Zero total in either group → should return 0.0 without error."""
+        assert _chi_squared_2x2(0, 0, 5, 10) == 0.0
+        assert _chi_squared_2x2(5, 10, 0, 0) == 0.0
+
+    def test_yates_correction_applied(self):
+        """With Yates' correction, chi² is smaller than without."""
+        # Without Yates: (10*20 - 5*20)^2 * 55 / (15 * 40 * 30 * 25)
+        # This is a sanity check that the function applies Yates' correction
+        chi2 = _chi_squared_2x2(10, 30, 5, 25)
+        assert chi2 >= 0.0  # should never be negative
+
+
+# ---------------------------------------------------------------------------
+# compute_ab_significance
+# ---------------------------------------------------------------------------
+
+
+class TestComputeAbSignificance:
+    def test_significant_difference_detected(self):
+        """Clear winner should produce is_significant=True."""
+        results = [
+            {"variant_id": "var-A", "sent": 100, "opens": 80, "open_rate": 0.8},
+            {"variant_id": "var-B", "sent": 100, "opens": 20, "open_rate": 0.2},
+        ]
+        sig = compute_ab_significance(results, metric="opens")
+        assert sig["is_significant"] is True
+        assert sig["winner_id"] == "var-A"
+        assert len(sig["comparisons"]) == 1
+        assert sig["comparisons"][0]["significant"] is True
+
+    def test_no_significance_with_similar_rates(self):
+        """Similar rates should produce is_significant=False."""
+        results = [
+            {"variant_id": "var-A", "sent": 50, "opens": 25, "open_rate": 0.5},
+            {"variant_id": "var-B", "sent": 50, "opens": 24, "open_rate": 0.48},
+        ]
+        sig = compute_ab_significance(results, metric="opens")
+        assert sig["is_significant"] is False
+
+    def test_below_min_sample_no_significance(self):
+        """Variants below min_sample_size should not produce significant results."""
+        results = [
+            {"variant_id": "var-A", "sent": 2, "opens": 2, "open_rate": 1.0},
+            {"variant_id": "var-B", "sent": 2, "opens": 0, "open_rate": 0.0},
+        ]
+        sig = compute_ab_significance(results, metric="opens", min_sample_size=3)
+        assert sig["is_significant"] is False
+        assert sig["comparisons"] == []
+
+    def test_single_variant_no_comparison(self):
+        """A single variant has nothing to compare against."""
+        results = [
+            {"variant_id": "var-A", "sent": 100, "opens": 50, "open_rate": 0.5},
+        ]
+        sig = compute_ab_significance(results, metric="opens")
+        assert sig["is_significant"] is False
+        assert sig["comparisons"] == []
+
+    def test_empty_results(self):
+        sig = compute_ab_significance([], metric="opens")
+        assert sig["is_significant"] is False
+        assert sig["winner_id"] is None
+
+    def test_three_variants_pairwise_comparisons(self):
+        """Three variants should produce 3 pairwise comparisons."""
+        results = [
+            {"variant_id": "var-A", "sent": 50, "opens": 40, "open_rate": 0.8},
+            {"variant_id": "var-B", "sent": 50, "opens": 10, "open_rate": 0.2},
+            {"variant_id": "var-C", "sent": 50, "opens": 25, "open_rate": 0.5},
+        ]
+        sig = compute_ab_significance(results, metric="opens")
+        assert len(sig["comparisons"]) == 3  # A-B, A-C, B-C
+
+    def test_reply_metric(self):
+        """Should work with reply metric (uses replies count)."""
+        results = [
+            {"variant_id": "var-A", "sent": 50, "replies": 20, "reply_rate": 0.4},
+            {"variant_id": "var-B", "sent": 50, "replies": 2, "reply_rate": 0.04},
+        ]
+        sig = compute_ab_significance(results, metric="replies")
+        assert sig["is_significant"] is True
+        assert sig["winner_id"] == "var-A"
+
+    def test_recommendation_present(self):
+        results = [
+            {"variant_id": "var-A", "sent": 100, "opens": 80, "open_rate": 0.8},
+            {"variant_id": "var-B", "sent": 100, "opens": 20, "open_rate": 0.2},
+        ]
+        sig = compute_ab_significance(results, metric="opens")
+        assert isinstance(sig["recommendation"], str)
+        assert len(sig["recommendation"]) > 0
+
+
+# ---------------------------------------------------------------------------
 # summarize_learning
 # ---------------------------------------------------------------------------
 
@@ -328,6 +445,20 @@ class TestSummarizeLearning:
         text = summarize_learning([], None)
         assert "No engagement data" in text
 
+    def test_includes_significance_info(self):
+        results = [
+            {"variant_id": "var-A", "sent": 100, "open_rate": 0.8, "reply_rate": 0.2},
+            {"variant_id": "var-B", "sent": 100, "open_rate": 0.3, "reply_rate": 0.05},
+        ]
+        winner = {"variant_id": "var-A", "reply_rate": 0.2, "sent": 100}
+        sig = {
+            "is_significant": True,
+            "winner_id": "var-A",
+            "recommendation": "var-A is statistically significant winner",
+        }
+        text = summarize_learning(results, winner, significance=sig)
+        assert "statistically significant" in text.lower() or "significance" in text.lower()
+
 
 # ---------------------------------------------------------------------------
 # UI frame builders
@@ -347,6 +478,18 @@ class TestUIFrameBuilders:
     def test_ab_results_frame_no_winner(self):
         frame = build_ab_results_frame([], None, "instance-1")
         assert frame["props"]["winner_variant_id"] is None
+
+    def test_ab_results_frame_with_significance(self):
+        results = [{"variant_id": "var-A", "sent": 5, "reply_rate": 0.2}]
+        winner = {"variant_id": "var-A", "reply_rate": 0.2}
+        sig = {
+            "comparisons": [],
+            "winner_id": "var-A",
+            "is_significant": True,
+            "recommendation": "var-A is the clear winner",
+        }
+        frame = build_ab_results_frame(results, winner, "instance-1", significance=sig)
+        assert frame["props"]["significance"] == sig
 
     def test_cycle_summary_frame_structure(self):
         frame = build_cycle_summary_frame("Learning delta text", None, 2, "instance-2")

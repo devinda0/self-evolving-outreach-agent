@@ -9,6 +9,7 @@ from app.db.client import get_db
 from app.db.collections import (
     CAMPAIGN_SESSIONS,
     CONTENT_VARIANTS,
+    DEAD_LETTER_QUEUE,
     DEPLOYMENT_RECORDS,
     FEEDBACK_EVENTS,
     INTELLIGENCE_ENTRIES,
@@ -211,6 +212,64 @@ async def get_quarantine_events_for_session(session_id: str) -> list[dict[str, A
     """Return all quarantined events for a session, ordered by received_at ascending."""
     db = get_db()
     cursor = db[QUARANTINE].find({"session_id": session_id}).sort("received_at", ASCENDING)
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter queue
+# ---------------------------------------------------------------------------
+
+
+async def save_dlq_event(event: dict[str, Any]) -> None:
+    """Insert a failed webhook event into the dead-letter queue."""
+    db = get_db()
+    await db[DEAD_LETTER_QUEUE].insert_one({**event})
+
+
+async def get_dlq_events(
+    status: str = "pending",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return DLQ events filtered by status, ordered by created_at ascending."""
+    db = get_db()
+    cursor = (
+        db[DEAD_LETTER_QUEUE]
+        .find({"status": status})
+        .sort("created_at", ASCENDING)
+        .limit(limit)
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+async def update_dlq_event(
+    dedupe_key: str,
+    update: dict[str, Any],
+) -> None:
+    """Update a DLQ event by dedupe_key (e.g. increment retry_count, set status)."""
+    db = get_db()
+    await db[DEAD_LETTER_QUEUE].update_one(
+        {"dedupe_key": dedupe_key},
+        {"$set": update},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Engagement dashboard queries
+# ---------------------------------------------------------------------------
+
+
+async def get_deployment_records_for_session(session_id: str) -> list[dict[str, Any]]:
+    """Return all deployment records for a session."""
+    db = get_db()
+    cursor = db[DEPLOYMENT_RECORDS].find({"session_id": session_id}).sort("sent_at", ASCENDING)
     results = []
     async for doc in cursor:
         doc.pop("_id", None)

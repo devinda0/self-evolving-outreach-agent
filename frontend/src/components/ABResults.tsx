@@ -319,6 +319,21 @@ function VariantCard({
 export default function ABResults({ frame, onAction }: Props) {
   const results = (frame.props.results as VariantResult[]) ?? [];
   const winnerVariantId = (frame.props.winner_variant_id as string | null) ?? null;
+  const significance = frame.props.significance as {
+    comparisons?: Array<{
+      variant_a: string;
+      variant_b: string;
+      metric: string;
+      rate_a: number;
+      rate_b: number;
+      chi_squared: number;
+      significant: boolean;
+      effect_size: number;
+    }>;
+    winner_id?: string | null;
+    is_significant?: boolean;
+    recommendation?: string;
+  } | null;
 
   const nextCycleAction = frame.actions.find(
     (a: UIAction) =>
@@ -450,8 +465,107 @@ export default function ABResults({ frame, onAction }: Props) {
         </div>
       )}
 
+      {/* Statistical significance panel */}
+      {significance && significance.comparisons && significance.comparisons.length > 0 && (
+        <div
+          style={{
+            margin: "0 20px 12px",
+            padding: "14px",
+            background: significance.is_significant
+              ? "rgba(0,212,170,0.05)"
+              : "var(--bg-surface-3)",
+            border: `1px solid ${significance.is_significant ? "rgba(0,212,170,0.2)" : "var(--border-subtle)"}`,
+            borderRadius: "var(--radius-sm)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              marginBottom: "8px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "10px",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: significance.is_significant ? "var(--accent)" : "var(--text-muted)",
+              }}
+            >
+              Statistical Significance (chi-squared, p &lt; 0.05)
+            </span>
+            <span
+              style={{
+                fontSize: "9px",
+                fontFamily: "var(--font-mono)",
+                padding: "1px 6px",
+                borderRadius: "3px",
+                background: significance.is_significant
+                  ? "var(--accent-glow)"
+                  : "var(--bg-elevated)",
+                color: significance.is_significant ? "var(--accent)" : "var(--text-muted)",
+                border: `1px solid ${significance.is_significant ? "rgba(0,212,170,0.2)" : "var(--border-subtle)"}`,
+              }}
+            >
+              {significance.is_significant ? "SIGNIFICANT" : "NOT YET"}
+            </span>
+          </div>
+          {significance.comparisons.map((comp, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "4px 0",
+                fontSize: "11px",
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-secondary)",
+                borderBottom:
+                  idx < (significance.comparisons?.length ?? 0) - 1
+                    ? "1px solid var(--border-subtle)"
+                    : "none",
+              }}
+            >
+              <span>
+                {comp.variant_a.slice(0, 8)} vs {comp.variant_b.slice(0, 8)}
+              </span>
+              <span style={{ display: "flex", gap: "12px" }}>
+                <span>chi²={comp.chi_squared.toFixed(3)}</span>
+                <span>Δ={Math.round(comp.effect_size * 100)}%</span>
+                <span
+                  style={{
+                    color: comp.significant ? "var(--accent)" : "var(--text-muted)",
+                    fontWeight: comp.significant ? 700 : 400,
+                  }}
+                >
+                  {comp.significant ? "✓ sig" : "—"}
+                </span>
+              </span>
+            </div>
+          ))}
+          {significance.recommendation && (
+            <div
+              style={{
+                marginTop: "8px",
+                fontSize: "11px",
+                fontFamily: "var(--font-body)",
+                color: significance.is_significant ? "var(--accent-dim)" : "var(--text-muted)",
+                lineHeight: "1.5",
+              }}
+            >
+              {significance.recommendation}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Footer notice for no winner */}
-      {results.length > 0 && !hasWinner && (
+      {results.length > 0 && !hasWinner && !significance?.is_significant && (
         <div
           style={{
             margin: "0 20px 16px",

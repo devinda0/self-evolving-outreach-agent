@@ -54,3 +54,81 @@ class TestVerifyResendSignature:
         sig = self._make_signature(svix_id, stale_ts, body, secret)
 
         assert _verify_resend_signature(body, svix_id, stale_ts, sig, secret) is False
+
+
+# ---------------------------------------------------------------------------
+# CAN-SPAM footer injection
+# ---------------------------------------------------------------------------
+
+
+class TestInjectCanSpamFooter:
+    def test_appends_footer_with_unsubscribe_and_address(self):
+        from unittest.mock import patch
+        from app.tools.resend_client import inject_can_spam_footer
+
+        with patch("app.tools.resend_client.settings") as mock_settings:
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsub"
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St, City, ST 00000"
+            html = inject_can_spam_footer("<p>Hello</p>", session_id="sess-1")
+
+        assert "unsubscribe here" in html.lower()
+        assert "123 Main St" in html
+        assert "sid=sess-1" in html
+
+    def test_inserts_before_body_close_tag(self):
+        from unittest.mock import patch
+        from app.tools.resend_client import inject_can_spam_footer
+
+        with patch("app.tools.resend_client.settings") as mock_settings:
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsub"
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St"
+            html = inject_can_spam_footer("<html><body><p>Hello</p></body></html>", "s1")
+
+        # Footer should appear before </body>
+        body_idx = html.lower().rfind("</body>")
+        unsub_idx = html.lower().rfind("unsubscribe")
+        assert unsub_idx < body_idx
+
+    def test_no_config_returns_original(self):
+        from unittest.mock import patch
+        from app.tools.resend_client import inject_can_spam_footer
+
+        with patch("app.tools.resend_client.settings") as mock_settings:
+            mock_settings.UNSUBSCRIBE_URL = ""
+            mock_settings.PHYSICAL_ADDRESS = ""
+            html = inject_can_spam_footer("<p>Hello</p>")
+
+        assert html == "<p>Hello</p>"
+
+    def test_only_physical_address(self):
+        from unittest.mock import patch
+        from app.tools.resend_client import inject_can_spam_footer
+
+        with patch("app.tools.resend_client.settings") as mock_settings:
+            mock_settings.UNSUBSCRIBE_URL = ""
+            mock_settings.PHYSICAL_ADDRESS = "456 Oak Ave"
+            html = inject_can_spam_footer("<p>Hello</p>")
+
+        assert "456 Oak Ave" in html
+        assert "unsubscribe" not in html.lower()
+
+
+# ---------------------------------------------------------------------------
+# Token-bucket rate limiter
+# ---------------------------------------------------------------------------
+
+
+class TestTokenBucket:
+    async def test_acquire_does_not_raise(self):
+        from app.tools.resend_client import _TokenBucket
+
+        bucket = _TokenBucket(rate=10, interval=1.0)
+        # Should complete without error
+        await bucket.acquire()
+
+    async def test_multiple_acquires_within_rate(self):
+        from app.tools.resend_client import _TokenBucket
+
+        bucket = _TokenBucket(rate=100, interval=1.0)
+        for _ in range(50):
+            await bucket.acquire()

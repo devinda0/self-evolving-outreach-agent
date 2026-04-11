@@ -19,6 +19,7 @@ from app.agents.deployment_agent import (
     build_ab_split_plan,
     build_delivery_status_frame,
     build_deployment_confirm_frame,
+    check_production_readiness,
     deployment_agent_node,
     mock_send,
     personalize_variant,
@@ -687,3 +688,119 @@ class TestFailedSendHandling:
         assert len(records) == 2
         statuses = {r["status"] for r in records}
         assert statuses == {"sent", "failed"}
+
+
+# ---------------------------------------------------------------------------
+# Production readiness check
+# ---------------------------------------------------------------------------
+
+
+class TestCheckProductionReadiness:
+    def test_fully_configured_returns_no_errors(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.RESEND_API_KEY = "re_test_123"
+            mock_settings.RESEND_FROM_EMAIL = "noreply@verified-domain.com"
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsubscribe"
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St, City, ST 00000"
+            errors = check_production_readiness()
+        assert errors == []
+
+    def test_missing_api_key(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.RESEND_API_KEY = ""
+            mock_settings.RESEND_FROM_EMAIL = "noreply@verified.com"
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsubscribe"
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St"
+            errors = check_production_readiness()
+        assert any("RESEND_API_KEY" in e for e in errors)
+
+    def test_default_placeholder_from_email(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.RESEND_API_KEY = "re_test_123"
+            mock_settings.RESEND_FROM_EMAIL = "outreach@yourdomain.com"
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsubscribe"
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St"
+            errors = check_production_readiness()
+        assert any("RESEND_FROM_EMAIL" in e for e in errors)
+
+    def test_missing_unsubscribe_url(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.RESEND_API_KEY = "re_test_123"
+            mock_settings.RESEND_FROM_EMAIL = "noreply@verified.com"
+            mock_settings.UNSUBSCRIBE_URL = ""
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St"
+            errors = check_production_readiness()
+        assert any("UNSUBSCRIBE_URL" in e for e in errors)
+
+    def test_missing_physical_address(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.RESEND_API_KEY = "re_test_123"
+            mock_settings.RESEND_FROM_EMAIL = "noreply@verified.com"
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsubscribe"
+            mock_settings.PHYSICAL_ADDRESS = ""
+            errors = check_production_readiness()
+        assert any("PHYSICAL_ADDRESS" in e for e in errors)
+
+    def test_all_missing_returns_four_errors(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.RESEND_API_KEY = ""
+            mock_settings.RESEND_FROM_EMAIL = ""
+            mock_settings.UNSUBSCRIBE_URL = ""
+            mock_settings.PHYSICAL_ADDRESS = ""
+            errors = check_production_readiness()
+        assert len(errors) == 4
+
+
+class TestProductionModePreFlight:
+    async def test_blocks_unconfirmed_deploy_when_production_misconfigured(self):
+        """Pre-flight should return error_messages when USE_MOCK_SEND=False but config is incomplete."""
+        state = _make_state(
+            deployment_confirmed=False,
+            content_variants=_make_variants(1),
+            selected_variant_ids=["var-1"],
+            prospect_cards=_make_prospects(2),
+            selected_prospect_ids=["prospect-1", "prospect-2"],
+        )
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.USE_MOCK_SEND = False
+            mock_settings.RESEND_API_KEY = ""
+            mock_settings.RESEND_FROM_EMAIL = "outreach@yourdomain.com"
+            mock_settings.UNSUBSCRIBE_URL = ""
+            mock_settings.PHYSICAL_ADDRESS = ""
+            result = await deployment_agent_node(state)
+
+        assert result["session_complete"] is True
+        assert len(result["error_messages"]) > 1
+        assert any("configuration" in e.lower() for e in result["error_messages"])
+
+    async def test_passes_preflight_when_production_fully_configured(self):
+        """Pre-flight should pass and emit DeploymentConfirm when config is valid."""
+        state = _make_state(
+            deployment_confirmed=False,
+            content_variants=_make_variants(1),
+            selected_variant_ids=["var-1"],
+            prospect_cards=_make_prospects(2),
+            selected_prospect_ids=["prospect-1", "prospect-2"],
+        )
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.USE_MOCK_SEND = False
+            mock_settings.RESEND_API_KEY = "re_test_123"
+            mock_settings.RESEND_FROM_EMAIL = "noreply@verified.com"
+            mock_settings.UNSUBSCRIBE_URL = "https://example.com/unsub"
+            mock_settings.PHYSICAL_ADDRESS = "123 Main St"
+            result = await deployment_agent_node(state)
+
+        assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"
+
+    async def test_mock_mode_skips_preflight(self):
+        """Pre-flight check is only run when USE_MOCK_SEND=False."""
+        state = _make_state(
+            deployment_confirmed=False,
+            content_variants=_make_variants(1),
+            selected_variant_ids=["var-1"],
+            prospect_cards=_make_prospects(2),
+            selected_prospect_ids=["prospect-1", "prospect-2"],
+        )
+        # USE_MOCK_SEND defaults to True — should not block
+        result = await deployment_agent_node(state)
+        assert result["pending_ui_frames"][0]["component"] == "DeploymentConfirm"

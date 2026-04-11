@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str = "outreach@yourdomain.com"
     RESEND_WEBHOOK_SECRET: str = ""  # svix signing secret (whsec_...) — optional but recommended
 
+    # CAN-SPAM compliance
+    UNSUBSCRIBE_URL: str = ""  # e.g. https://yourdomain.com/unsubscribe
+    PHYSICAL_ADDRESS: str = ""  # required by CAN-SPAM, e.g. "123 Main St, Suite 100, City, ST 00000"
+
+    # Send-rate throttling
+    SEND_RATE_LIMIT: int = 10  # max emails per interval
+    SEND_RATE_INTERVAL_SECONDS: int = 1  # interval in seconds for rate limit window
+
+    # Dead-letter queue
+    WEBHOOK_DLQ_MAX_RETRIES: int = 3  # max retry attempts for failed webhook processing
+
     # LinkedIn deployment
     UNIPILE_API_KEY: str = ""
     UNIPILE_LINKEDIN_ACCOUNT_ID: str = ""

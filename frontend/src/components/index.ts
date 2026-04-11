@@ -5,6 +5,7 @@ export { default as ClarificationPrompt } from "./ClarificationPrompt";
 export { default as DeploymentConfirm } from "./DeploymentConfirm";
 export { default as DeliveryStatusCard } from "./DeliveryStatusCard";
 export { default as ABResults } from "./ABResults";
+export { default as EngagementDashboard } from "./EngagementDashboard";
 export { default as CycleSummary } from "./CycleSummary";
 export { default as FeedbackPrompt } from "./FeedbackPrompt";
 export { default as ManualFeedbackInput } from "./ManualFeedbackInput";
