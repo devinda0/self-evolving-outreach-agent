@@ -325,8 +325,9 @@ async def test_content_agent_e2e_real_gemini():
 
     # 10. Verify VariantGrid UI frame
     frames = result["pending_ui_frames"]
-    assert len(frames) >= 1
-    grid_frame = frames[0]
+    assert len(frames) >= 2
+    assert frames[0]["component"] == "MessageRenderer"  # response message
+    grid_frame = frames[1]
     assert grid_frame["component"] == "VariantGrid"
     assert grid_frame["type"] == "ui_component"
     assert len(grid_frame["props"]["variants"]) == 3
@@ -452,10 +453,11 @@ async def test_content_agent_mock_llm_fallback():
     db_variants = await get_variants_for_session(session_id)
     assert len(db_variants) == 3
 
-    # Verify VariantGrid frame
+    # Verify UI frames include a response message and VariantGrid
     frames = result["pending_ui_frames"]
-    assert len(frames) >= 1
-    assert frames[0]["component"] == "VariantGrid"
+    assert len(frames) >= 2
+    assert frames[0]["component"] == "MessageRenderer"  # response message
+    assert frames[1]["component"] == "VariantGrid"
 
 
 # ---------------------------------------------------------------------------
@@ -581,8 +583,9 @@ async def test_e2e_research_segment_content_pipeline():
 
     # 7. Verify VariantGrid UI frame
     frames = content_result["pending_ui_frames"]
-    assert len(frames) >= 1
-    grid_frame = frames[0]
+    assert len(frames) >= 2
+    assert frames[0]["component"] == "MessageRenderer"  # response message
+    grid_frame = frames[1]
     assert grid_frame["component"] == "VariantGrid"
     assert grid_frame["type"] == "ui_component"
 

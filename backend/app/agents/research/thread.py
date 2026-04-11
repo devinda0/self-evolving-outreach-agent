@@ -48,9 +48,10 @@ Product: {product_name}
 Target Market: {target_market}
 Research Dimension: {thread_type}
 Research Focus: {thread_prompt}
-
+{user_directive_section}
 Generate exactly {num_queries} distinct, specific search queries to investigate this dimension.
 Each query should target a different angle or sub-topic.
+If a user directive is provided above, prioritize queries that directly address what the user asked for.
 
 Output strict JSON array of strings, no markdown, no prose:
 ["query 1", "query 2", ...]"""
@@ -60,6 +61,7 @@ SYNTHESIS_PROMPT = """You are a research analyst synthesizing raw search results
 Product: {product_name}
 Target Market: {target_market}
 Research Dimension: {thread_type}
+{user_directive_section}
 {prior_intelligence_section}
 
 Raw search results:
@@ -67,6 +69,7 @@ Raw search results:
 
 Analyze the results and produce exactly {num_findings} research findings.
 Each finding must be a concrete, evidence-backed claim with a clear actionable implication.
+If a user directive is provided above, prioritize findings that are most relevant to what the user asked for.
 Assign a confidence score (0.0-1.0) based on source quality and corroboration.
 Extract audience language — exact phrases the target audience uses.
 
@@ -104,16 +107,27 @@ async def generate_queries(
     target_market: str,
     thread_type: str,
     num_queries: int = 3,
+    user_directive: str | None = None,
 ) -> list[str]:
     """Generate search queries for a research thread using Gemini."""
     llm = _get_llm()
     if llm is None:
         # Mock mode fallback
-        return [
+        base_queries = [
             f"{product_name} {thread_type} {target_market}",
             f"{thread_type} trends {target_market} 2026",
             f"{product_name} {thread_type} analysis",
         ]
+        if user_directive:
+            base_queries[0] = f"{user_directive} {product_name} {thread_type}"
+        return base_queries
+
+    directive_section = ""
+    if user_directive:
+        directive_section = (
+            f"\nUser's specific request: {user_directive}\n"
+            "Tailor queries to address this request while staying within the research dimension.\n"
+        )
 
     prompt = QUERY_GENERATION_PROMPT.format(
         product_name=product_name,
@@ -121,6 +135,7 @@ async def generate_queries(
         thread_type=thread_type,
         thread_prompt=THREAD_PROMPTS.get(thread_type, "General research"),
         num_queries=num_queries,
+        user_directive_section=directive_section,
     )
 
     try:
@@ -145,6 +160,7 @@ async def synthesize_thread_findings(
     raw_results: list[dict],
     prior_intelligence: str | None = None,
     num_findings: int = 3,
+    user_directive: str | None = None,
 ) -> list[dict]:
     """Synthesize raw search results into structured ResearchFinding dicts using Gemini."""
     if not raw_results:
@@ -162,6 +178,13 @@ async def synthesize_thread_findings(
     if prior_intelligence:
         prior_section = f"Prior intelligence from earlier cycles:\n{prior_intelligence}\n"
 
+    directive_section = ""
+    if user_directive:
+        directive_section = (
+            f"\nUser's specific research request: {user_directive}\n"
+            "Prioritize findings that directly address this request.\n"
+        )
+
     prompt = SYNTHESIS_PROMPT.format(
         product_name=product_name,
         target_market=target_market,
@@ -169,6 +192,7 @@ async def synthesize_thread_findings(
         prior_intelligence_section=prior_section,
         raw_results_text=raw_results_text,
         num_findings=num_findings,
+        user_directive_section=directive_section,
     )
 
     try:
@@ -273,6 +297,7 @@ async def research_thread_node(state: CampaignState) -> dict:
     session_id = state.get("session_id", "unknown")
     product_name = state.get("product_name", "")
     target_market = state.get("target_market", "")
+    user_directive = state.get("user_directive")
     policy: dict = cast(dict, state.get("research_policy") or DEFAULT_RESEARCH_POLICY)
 
     logger.info("research_thread_node | session=%s thread=%s", session_id, thread_type)
@@ -294,7 +319,10 @@ async def research_thread_node(state: CampaignState) -> dict:
 
     try:
         # Step 1: Generate targeted queries
-        queries = await generate_queries(product_name, target_market, thread_type)
+        queries = await generate_queries(
+            product_name, target_market, thread_type,
+            user_directive=user_directive,
+        )
 
         # Step 2: Run searches
         all_results = []
@@ -326,6 +354,7 @@ async def research_thread_node(state: CampaignState) -> dict:
             target_market=target_market,
             raw_results=all_results,
             prior_intelligence=prior_intelligence,
+            user_directive=user_directive,
         )
 
         # Enrich findings with session metadata

@@ -24,7 +24,7 @@ BRIEFING_PROMPT = """You are a senior research analyst producing an executive br
 Product: {product_name}
 Target Market: {target_market}
 Cycle: {cycle_number}
-
+{user_directive_section}
 Research findings from {thread_count} parallel threads ({finding_count} total findings):
 
 {findings_text}
@@ -34,6 +34,9 @@ Produce a structured briefing summarizing what was discovered. Include:
 2. Key themes across threads
 3. Top opportunities for outreach
 4. Research gaps that need further investigation
+5. A concise response_message (1-2 sentences) that directly addresses the user's request and tells them what you found
+
+If a user directive is provided above, ensure the executive summary and response_message focus on what the user asked for.
 
 Output strict JSON, no markdown, no prose:
 {{
@@ -41,7 +44,8 @@ Output strict JSON, no markdown, no prose:
   "key_themes": ["theme 1", "theme 2", ...],
   "top_opportunities": ["opp 1", "opp 2", ...],
   "gaps": ["gap 1", "gap 2", ...],
-  "recommended_next_steps": ["step 1", "step 2", ...]
+  "recommended_next_steps": ["step 1", "step 2", ...],
+  "response_message": "A brief, direct response to the user about what was found"
 }}"""
 
 
@@ -98,10 +102,11 @@ def _deduplicate_findings(findings: list[dict]) -> list[dict]:
     return sorted(seen_claims.values(), key=lambda x: x.get("confidence", 0), reverse=True)
 
 
-def _mock_briefing(findings: list[dict]) -> dict:
+def _mock_briefing(findings: list[dict], user_directive: str | None = None) -> dict:
     """Produce a mock briefing when LLM is unavailable."""
     thread_types = list({f.get("thread_type", "unknown") for f in findings})
     claims = [f.get("claim", "") for f in findings[:5]]
+    directive_detail = f" regarding '{user_directive}'" if user_directive else ""
     return {
         "executive_summary": (
             f"Research across {len(thread_types)} dimensions produced {len(findings)} findings. "
@@ -115,6 +120,10 @@ def _mock_briefing(findings: list[dict]) -> dict:
             if t not in {f.get("thread_type") for f in findings if f.get("confidence", 0) > 0.6}
         ],
         "recommended_next_steps": ["Define target segment", "Generate content variants"],
+        "response_message": (
+            f"Research complete{directive_detail} — discovered {len(findings)} findings "
+            f"across {len(thread_types)} dimensions. Review the briefing below for key insights."
+        ),
     }
 
 
@@ -123,14 +132,22 @@ async def synthesize_briefing(
     target_market: str,
     findings: list[dict],
     cycle_number: int = 1,
+    user_directive: str | None = None,
 ) -> dict:
     """Generate an executive briefing from research findings using Gemini."""
     llm = _get_llm()
     if llm is None:
-        return _mock_briefing(findings)
+        return _mock_briefing(findings, user_directive)
 
     thread_types = list({f.get("thread_type", "unknown") for f in findings})
     findings_text = _format_findings_for_prompt(findings)
+
+    directive_section = ""
+    if user_directive:
+        directive_section = (
+            f"User's specific request: {user_directive}\n"
+            "Focus the briefing and response_message on addressing this request.\n"
+        )
 
     prompt = BRIEFING_PROMPT.format(
         product_name=product_name,
@@ -139,6 +156,7 @@ async def synthesize_briefing(
         thread_count=len(thread_types),
         finding_count=len(findings),
         findings_text=findings_text,
+        user_directive_section=directive_section,
     )
 
     try:
@@ -157,6 +175,7 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
     session_id = state.get("session_id", "unknown")
     findings = state.get("research_findings", [])
     failed = state.get("failed_threads", [])
+    user_directive = state.get("user_directive")
 
     logger.info(
         "research_synthesizer_node | session=%s findings=%d failed_threads=%s",
@@ -180,6 +199,7 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
         target_market=state.get("target_market", ""),
         findings=deduplicated,
         cycle_number=state.get("cycle_number", 1),
+        user_directive=user_directive,
     )
 
     # Persist all findings to MongoDB
@@ -223,12 +243,26 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
         ],
     )
 
+    # Build response message for the user
+    response_message = briefing.get("response_message") or (
+        f"Research complete — discovered {len(deduplicated)} findings "
+        f"across {len(_thread_summary(deduplicated))} dimensions. "
+        "Review the briefing below for key insights."
+    )
+    response_frame = UIFrame(
+        type="text",
+        component="MessageRenderer",
+        instance_id=f"research_response_{uuid4().hex[:8]}",
+        props={"content": response_message, "role": "assistant"},
+        actions=[],
+    )
+
     return {
         "briefing_summary": briefing.get("executive_summary", ""),
         "research_gaps": briefing.get("gaps", []),
         "active_stage_summary": "research complete — briefing ready",
         "session_complete": True,
-        "pending_ui_frames": [ui_frame.model_dump()],
+        "pending_ui_frames": [response_frame.model_dump(), ui_frame.model_dump()],
     }
 
 

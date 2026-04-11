@@ -651,6 +651,40 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         learning_delta, winner, cycle_number, f"cycle-summary-{run_id}"
     )
 
+    # Build response message summarizing the feedback analysis
+    user_directive = state.get("user_directive")
+    total_events = len(events)
+
+    if winner:
+        winner_summary = (
+            f"Variant {winner['variant_id'][:8]} is the winner with "
+            f"{winner.get('reply_rate', 0):.1%} reply rate."
+        )
+    else:
+        winner_summary = "No clear winner yet — more data is needed."
+
+    sig_note = ""
+    if significance and significance.get("is_significant"):
+        sig_note = " Results are statistically significant (p < 0.05)."
+
+    directive_note = ""
+    if user_directive:
+        directive_note = f" (per your request: {user_directive})"
+
+    response_message = (
+        f"Feedback analysis complete{directive_note}. "
+        f"Processed {total_events} engagement events across {len(results)} variants. "
+        f"{winner_summary}{sig_note} "
+        f"Cycle {cycle_number} learning has been captured for the next iteration."
+    )
+    response_frame = UIFrame(
+        type="text",
+        component="MessageRenderer",
+        instance_id=f"feedback_response_{run_id}",
+        props={"content": response_message, "role": "assistant"},
+        actions=[],
+    ).model_dump()
+
     return {
         "engagement_results": results,
         "winning_variant_id": winner["variant_id"] if winner else None,
@@ -658,5 +692,5 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         "prior_cycle_summary": learning_delta,
         "cycle_number": cycle_number + 1,
         "next_node": "orchestrator",
-        "pending_ui_frames": [ab_frame, summary_frame],
+        "pending_ui_frames": [response_frame, ab_frame, summary_frame],
     }

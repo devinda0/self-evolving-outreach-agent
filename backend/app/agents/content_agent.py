@@ -780,6 +780,35 @@ async def content_agent_node(state: CampaignState) -> dict:
     )
     ui_frames.append(visual_frame)
 
+    # Build response message summarizing what was generated
+    user_directive = state.get("user_directive")
+    channels_used = list({v.intended_channel for v in variants})
+    angles_used = [v.angle_label for v in variants if v.angle_label]
+    personalized_count = sum(1 for v in variants if v.personalized_for)
+
+    directive_note = ""
+    if user_directive:
+        directive_note = f" based on your direction: \"{user_directive}\""
+
+    personalization_note = ""
+    if personalized_count > 0:
+        personalization_note = f", each personalized for a specific prospect"
+
+    response_message = (
+        f"Content generation complete{directive_note}. "
+        f"Created {len(variants)} variant(s) across {', '.join(channels_used)}{personalization_note}. "
+        f"Angles: {', '.join(angles_used) if angles_used else 'various'}. "
+        "Review and select the variants you'd like to deploy below."
+    )
+    response_frame = UIFrame(
+        type="text",
+        component="MessageRenderer",
+        instance_id=f"content_response_{uuid4().hex[:8]}",
+        props={"content": response_message, "role": "assistant"},
+        actions=[],
+    ).model_dump()
+    ui_frames.insert(0, response_frame)
+
     logger.info(
         "content_agent_node completed | session=%s variants=%d visual=%s",
         session_id,

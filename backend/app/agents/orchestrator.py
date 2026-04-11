@@ -90,6 +90,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 {
   "current_intent": "<one of: research, segment, prospect_manage, generate, deploy, feedback, refined_cycle, answer, update_context, clarify>",
   "reasoning": "<one sentence explaining your classification>",
+  "user_directive": "<a clear, actionable summary of WHAT the user wants the next agent to do — capture specific focus areas, constraints, preferences, and tone from the user's message. Examples: 'Research competitor pricing strategies for enterprise SaaS', 'Generate 3 email variants with a casual, friendly tone focused on cost savings', 'Deploy only the ROI-focused variant to top 3 prospects'. This MUST reflect the user's specific request, not a generic description of what the agent does.>",
   "clarification_question": "<only if current_intent=clarify, else null>",
   "clarification_options": ["<option1>", "<option2>", "..."],
   "next_node": "<research, segment, generate, deploy, feedback, answer, update_context, clarify>"
@@ -291,6 +292,7 @@ Classify the latest user intent."""
                 "current_intent": result["current_intent"],
                 "previous_intent": state.get("current_intent"),
                 "next_node": result["next_node"],
+                "user_directive": result.get("user_directive"),
                 "clarification_question": result.get("clarification_question"),
                 "clarification_options": result.get("clarification_options", []),
                 "intent_history": state.get("intent_history", []) + [result["current_intent"]],
@@ -330,6 +332,7 @@ Classify the latest user intent."""
         "current_intent": "clarify",
         "previous_intent": state.get("current_intent"),
         "next_node": "clarify",
+        "user_directive": None,
         "clarification_question": DEFAULT_CLARIFICATION,
         "clarification_options": DEFAULT_OPTIONS,
         "intent_history": state.get("intent_history", []) + ["clarify"],
@@ -343,6 +346,7 @@ def _make_clarify_response(state: CampaignState) -> dict[str, Any]:
         "current_intent": "clarify",
         "previous_intent": state.get("current_intent"),
         "next_node": "clarify",
+        "user_directive": None,
         "clarification_question": DEFAULT_CLARIFICATION,
         "clarification_options": DEFAULT_OPTIONS,
         "intent_history": state.get("intent_history", []) + ["clarify"],

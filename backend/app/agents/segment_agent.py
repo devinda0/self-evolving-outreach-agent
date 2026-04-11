@@ -523,11 +523,13 @@ async def segment_agent_node(state: CampaignState) -> dict:
     session_id = state.get("session_id", "")
     briefing_present = bool(state.get("briefing_summary"))
     findings_count = len(state.get("research_findings", []))
+    user_directive = state.get("user_directive")
     logger.info(
-        "segment_agent_node called | session=%s briefing=%s findings=%d",
+        "segment_agent_node called | session=%s briefing=%s findings=%d directive=%s",
         session_id,
         briefing_present,
         findings_count,
+        user_directive[:80] if user_directive else None,
     )
 
     # Build scoped context bundle for structured context access
@@ -587,10 +589,33 @@ async def segment_agent_node(state: CampaignState) -> dict:
         len(cards),
     )
 
+    # Build a response message for the user
+    directive_note = ""
+    if user_directive:
+        directive_note = f" based on your request to {user_directive.lower().rstrip('.')}."
+    else:
+        directive_note = " from research findings."
+
+    top_prospect_names = [c.get("name", "Unknown") for c in cards[:3]]
+    prospect_preview = ", ".join(top_prospect_names)
+    response_message = (
+        f"Segmentation complete{directive_note} "
+        f"Identified {len(segments)} target segments and {len(cards)} prospects. "
+        f"Top prospects: {prospect_preview}. "
+        "Review and select the prospects you'd like to target below."
+    )
+    response_frame = UIFrame(
+        type="text",
+        component="MessageRenderer",
+        instance_id=f"segment_response_{uuid.uuid4().hex[:8]}",
+        props={"content": response_message, "role": "assistant"},
+        actions=[],
+    ).model_dump()
+
     return {
         "segment_candidates": [s.model_dump() for s in segments],
         "prospect_cards": cards,
         "next_node": "orchestrator",
         "session_complete": True,
-        "pending_ui_frames": [segment_frame, prospect_frame],
+        "pending_ui_frames": [response_frame, segment_frame, prospect_frame],
     }

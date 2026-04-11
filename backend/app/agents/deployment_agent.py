@@ -391,6 +391,33 @@ async def deployment_agent_node(state: CampaignState) -> dict:
             ab_plan,
             f"deploy-confirm-{session_id[:8]}",
         )
+
+        # Build a response message describing the deployment plan
+        user_directive = state.get("user_directive")
+        directive_note = ""
+        if user_directive:
+            directive_note = f" as you requested ({user_directive}). "
+        else:
+            directive_note = ". "
+
+        variant_labels = [v.get("angle_label", v.get("intended_channel", "variant")) for v in selected_variants]
+        prospect_names = [p.get("name", "Unknown") for p in selected_prospects[:3]]
+        more_prospects = f" and {len(selected_prospects) - 3} more" if len(selected_prospects) > 3 else ""
+
+        response_message = (
+            f"Ready to deploy{directive_note}"
+            f"Sending {len(selected_variants)} variant(s) ({', '.join(variant_labels)}) "
+            f"to {len(selected_prospects)} prospect(s): {', '.join(prospect_names)}{more_prospects}. "
+            "Please confirm the deployment below."
+        )
+        response_frame = UIFrame(
+            type="text",
+            component="MessageRenderer",
+            instance_id=f"deploy_response_{uuid4().hex[:8]}",
+            props={"content": response_message, "role": "assistant"},
+            actions=[],
+        ).model_dump()
+
         logger.info(
             "deployment_agent_node: awaiting confirmation | session=%s variants=%d prospects=%d",
             session_id,
@@ -400,7 +427,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         return {
             "ab_split_plan": ab_plan,
             "next_node": "orchestrator",
-            "pending_ui_frames": [confirm_frame],
+            "pending_ui_frames": [response_frame, confirm_frame],
         }
 
     # -- Confirmed: execute deployment --
@@ -458,6 +485,28 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         f"delivery-status-{session_id[:8]}",
     )
 
+    # Build post-deployment response message
+    sent_count = sum(1 for r in deployment_records if r.get("status") == "sent")
+    failed_count = sum(1 for r in deployment_records if r.get("status") == "failed")
+    channels_used = list({r.get("channel", "email") for r in deployment_records})
+
+    if failed_count == 0:
+        status_summary = f"All {sent_count} messages sent successfully"
+    else:
+        status_summary = f"{sent_count} sent, {failed_count} failed"
+
+    response_message = (
+        f"Deployment complete — {status_summary} via {', '.join(channels_used)}. "
+        "You can track engagement results as they come in, or report feedback manually."
+    )
+    response_frame = UIFrame(
+        type="text",
+        component="MessageRenderer",
+        instance_id=f"deploy_done_{uuid4().hex[:8]}",
+        props={"content": response_message, "role": "assistant"},
+        actions=[],
+    ).model_dump()
+
     logger.info(
         "deployment_agent_node completed | session=%s records=%d",
         session_id,
@@ -469,5 +518,5 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         "deployment_confirmed": False,  # reset for next cycle
         "next_node": "orchestrator",
         "session_complete": True,
-        "pending_ui_frames": [status_frame],
+        "pending_ui_frames": [response_frame, status_frame],
     }

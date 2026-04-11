@@ -23,6 +23,7 @@ class CampaignState(TypedDict):
     current_intent: Optional[str]
     previous_intent: Optional[str]
     next_node: Optional[str]
+    user_directive: Optional[str]  # What the user specifically wants from the next agent
     clarification_question: Optional[str]
     clarification_options: list[str]
     session_complete: bool
