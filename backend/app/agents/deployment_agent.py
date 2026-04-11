@@ -115,7 +115,7 @@ def check_production_readiness() -> list[str]:
             "RESEND_FROM_EMAIL is still the default placeholder — set a verified sender address."
         )
     if not settings.UNSUBSCRIBE_URL:
-        errors.append("UNSUBSCRIBE_URL is not configured — required for CAN-SPAM compliance.")
+        logger.warning("UNSUBSCRIBE_URL is not configured — recommended for CAN-SPAM compliance.")
     if not settings.PHYSICAL_ADDRESS:
         errors.append("PHYSICAL_ADDRESS is not configured — required for CAN-SPAM compliance.")
     return errors

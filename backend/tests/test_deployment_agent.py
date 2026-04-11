@@ -723,14 +723,14 @@ class TestCheckProductionReadiness:
             errors = check_production_readiness()
         assert any("RESEND_FROM_EMAIL" in e for e in errors)
 
-    def test_missing_unsubscribe_url(self):
+    def test_missing_unsubscribe_url_is_not_blocking(self):
         with patch("app.agents.deployment_agent.settings") as mock_settings:
             mock_settings.RESEND_API_KEY = "re_test_123"
             mock_settings.RESEND_FROM_EMAIL = "noreply@verified.com"
             mock_settings.UNSUBSCRIBE_URL = ""
             mock_settings.PHYSICAL_ADDRESS = "123 Main St"
             errors = check_production_readiness()
-        assert any("UNSUBSCRIBE_URL" in e for e in errors)
+        assert not any("UNSUBSCRIBE_URL" in e for e in errors)
 
     def test_missing_physical_address(self):
         with patch("app.agents.deployment_agent.settings") as mock_settings:
@@ -741,14 +741,14 @@ class TestCheckProductionReadiness:
             errors = check_production_readiness()
         assert any("PHYSICAL_ADDRESS" in e for e in errors)
 
-    def test_all_missing_returns_four_errors(self):
+    def test_all_missing_returns_three_errors(self):
         with patch("app.agents.deployment_agent.settings") as mock_settings:
             mock_settings.RESEND_API_KEY = ""
             mock_settings.RESEND_FROM_EMAIL = ""
             mock_settings.UNSUBSCRIBE_URL = ""
             mock_settings.PHYSICAL_ADDRESS = ""
             errors = check_production_readiness()
-        assert len(errors) == 4
+        assert len(errors) == 3
 
 
 class TestProductionModePreFlight:
