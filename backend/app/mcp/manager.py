@@ -218,63 +218,71 @@ def _parse_tool(raw: dict) -> MCPTool:
     )
 
 
+def _is_classic_sse_url(url: str) -> bool:
+    """Return True if the URL points to a classic SSE endpoint (path contains /sse).
+
+    Classic SSE:   GET /sse  →  endpoint event  →  POST /messages
+    Streamable HTTP: POST /mcp  (newer MCP spec)
+    """
+    from urllib.parse import urlparse
+    path = urlparse(url).path.rstrip("/")
+    return path.endswith("/sse")
+
+
 class MCPSSEServerProcess:
-    """Wraps an MCP server accessible via classic SSE (Server-Sent Events) transport.
+    """Wraps an MCP server accessible over HTTP — supports two sub-protocols:
 
-    The classic SSE MCP protocol works as follows:
-    1. Client opens a persistent GET connection to the SSE endpoint.
-    2. Server sends an ``endpoint`` event whose data is the message URL.
-    3. Client POSTs JSON-RPC requests to that message URL.
-    4. Responses arrive as ``message`` SSE events on the persistent stream.
+    **Classic SSE** (URL path ends in ``/sse``):
+      1. Client opens a persistent GET stream to the SSE endpoint.
+      2. Server sends an ``endpoint`` event whose data is the message URL.
+      3. Client POSTs JSON-RPC requests to the message URL.
+      4. Responses come back as ``message`` events on the SSE stream.
+      Used by: Bright Data ``/sse``.
 
-    This is the transport used by hosted MCP providers such as Bright Data.
+    **Streamable HTTP** (any other path, e.g. ``/mcp``):
+      POST each JSON-RPC message directly to the endpoint.
+      Response is either ``application/json`` (single) or ``text/event-stream`` (batch).
+      Used by: Bright Data ``/mcp``, Composio, and other modern hosted providers.
     """
 
     def __init__(self, config: MCPServerConfig) -> None:
         self.config = config
         self._client: httpx.AsyncClient | None = None
         self._base_url: str = config.url or ""
+        self._classic_sse: bool = _is_classic_sse_url(self._base_url)
+        # Classic SSE: message URL discovered from `endpoint` event
         self._message_url: str | None = None
-        # Maps JSON-RPC message id → Future awaiting the response
+        # Classic SSE: background reader state
         self._pending: dict[int, asyncio.Future] = {}
         self._reader_task: asyncio.Task | None = None
         self._sse_connected = asyncio.Event()
         self._running: bool = False
 
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     async def start(self) -> list[MCPTool]:
-        """Connect to the SSE endpoint, discover the message URL, initialize, and list tools."""
+        """Connect, initialize, and discover tools."""
         if not self._base_url:
             raise RuntimeError("SSE server URL is required")
 
-        sse_headers: dict[str, str] = {
-            "Accept": "text/event-stream",
-            "Cache-Control": "no-cache",
-        }
-        # Forward env vars as request headers (e.g. auth tokens)
+        extra_headers: dict[str, str] = {}
         for key, value in self.config.env.items():
-            header_name = key.replace("_", "-").title()
-            sse_headers[header_name] = value
+            extra_headers[key.replace("_", "-").title()] = value
 
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=30.0)
+            timeout=httpx.Timeout(connect=30.0, read=None, write=30.0, pool=30.0),
+            headers=extra_headers,
         )
         self._running = True
 
-        # Start the background SSE reader; it will set _sse_connected once the
-        # endpoint event is received.
-        self._reader_task = asyncio.create_task(self._sse_reader(sse_headers))
+        if self._classic_sse:
+            await self._start_classic_sse()
+        else:
+            # Streamable HTTP — message URL is the base URL itself
+            self._message_url = self._base_url
 
-        try:
-            await asyncio.wait_for(self._sse_connected.wait(), timeout=30)
-        except asyncio.TimeoutError:
-            self._running = False
-            raise RuntimeError("SSE MCP server did not send endpoint event within 30 s")
-
-        if not self._message_url:
-            # _sse_connected was set due to a connection error
-            raise RuntimeError("SSE MCP server did not respond to initialize")
-
-        # Initialize handshake
         init_result = await self._send_request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
@@ -284,10 +292,8 @@ class MCPSSEServerProcess:
         if init_result is None:
             raise RuntimeError("SSE MCP server did not respond to initialize")
 
-        # Send initialized notification
         await self._send_notification("notifications/initialized", {})
 
-        # Discover tools
         tools_result = await self._send_request("tools/list", {})
         tools: list[MCPTool] = []
         if tools_result and "tools" in tools_result:
@@ -295,6 +301,61 @@ class MCPSSEServerProcess:
                 tools.append(_parse_tool(raw_tool))
 
         return tools
+
+    async def _start_classic_sse(self) -> None:
+        """Open the GET stream and wait for the server's ``endpoint`` event."""
+        sse_headers: dict[str, str] = {
+            "Accept": "text/event-stream",
+            "Cache-Control": "no-cache",
+        }
+        self._reader_task = asyncio.create_task(self._sse_reader(sse_headers))
+
+        try:
+            await asyncio.wait_for(self._sse_connected.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            self._running = False
+            raise RuntimeError("SSE MCP server did not send endpoint event within 30 s")
+
+        if not self._message_url:
+            raise RuntimeError("SSE MCP server connection failed before sending endpoint")
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """Invoke a tool and return the result."""
+        result = await self._send_request("tools/call", {
+            "name": tool_name,
+            "arguments": arguments,
+        })
+
+        if result is None:
+            raise RuntimeError(f"No response from SSE MCP server for tool '{tool_name}'")
+
+        content = result.get("content", [])
+        if len(content) == 1 and content[0].get("type") == "text":
+            return content[0]["text"]
+        return content
+
+    async def stop(self) -> None:
+        """Tear down connections and clean up."""
+        self._running = False
+        if self._reader_task:
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._reader_task = None
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+        self._message_url = None
+
+    @property
+    def is_running(self) -> bool:
+        return self._running and self._client is not None
+
+    # ------------------------------------------------------------------
+    # Classic SSE: background reader
+    # ------------------------------------------------------------------
 
     async def _sse_reader(self, headers: dict[str, str]) -> None:
         """Background task: keeps the SSE stream open and dispatches responses."""
@@ -316,7 +377,6 @@ class MCPSSEServerProcess:
                     elif line.startswith("data:"):
                         data_lines.append(line[5:].strip())
                     elif line == "":
-                        # Blank line signals end of an SSE event — process it
                         data_str = "\n".join(data_lines).strip()
                         data_lines = []
 
@@ -325,7 +385,6 @@ class MCPSSEServerProcess:
                             continue
 
                         if event_type == "endpoint":
-                            # data is the message URL (may be relative)
                             msg_url = data_str
                             if msg_url.startswith("/"):
                                 from urllib.parse import urlparse
@@ -359,49 +418,24 @@ class MCPSSEServerProcess:
         except Exception as exc:
             if self._running:
                 logger.error("SSE reader error: %s", exc)
-            # Unblock anything waiting on the connection event
             for fut in self._pending.values():
                 if not fut.done():
                     fut.set_exception(exc)
             self._pending.clear()
             self._sse_connected.set()
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """Invoke a tool via the message URL and receive the result over SSE."""
-        result = await self._send_request("tools/call", {
-            "name": tool_name,
-            "arguments": arguments,
-        })
-
-        if result is None:
-            raise RuntimeError(f"No response from SSE MCP server for tool '{tool_name}'")
-
-        content = result.get("content", [])
-        if len(content) == 1 and content[0].get("type") == "text":
-            return content[0]["text"]
-        return content
-
-    async def stop(self) -> None:
-        """Tear down the SSE stream and HTTP client."""
-        self._running = False
-        if self._reader_task:
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._reader_task = None
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-        self._message_url = None
-
-    @property
-    def is_running(self) -> bool:
-        return self._running and self._client is not None
+    # ------------------------------------------------------------------
+    # JSON-RPC send helpers
+    # ------------------------------------------------------------------
 
     async def _send_request(self, method: str, params: dict) -> dict | None:
-        """POST a JSON-RPC request to the message URL; await the SSE response."""
+        """Send a JSON-RPC request and return the result."""
+        if self._classic_sse:
+            return await self._send_request_classic_sse(method, params)
+        return await self._send_request_streamable_http(method, params)
+
+    async def _send_request_classic_sse(self, method: str, params: dict) -> dict | None:
+        """POST to the message URL; await the response via the SSE stream."""
         if not self._client or not self._message_url:
             return None
 
@@ -410,12 +444,7 @@ class MCPSSEServerProcess:
         fut: asyncio.Future = loop.create_future()
         self._pending[msg_id] = fut
 
-        message = {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "method": method,
-            "params": params,
-        }
+        message = {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params}
 
         try:
             resp = await self._client.post(
@@ -444,16 +473,76 @@ class MCPSSEServerProcess:
             logger.error("Timeout waiting for SSE MCP response: method=%s id=%d", method, msg_id)
             return None
 
+    async def _send_request_streamable_http(self, method: str, params: dict) -> dict | None:
+        """POST a JSON-RPC request and parse the response (JSON or inline SSE)."""
+        if not self._client or not self._message_url:
+            return None
+
+        msg_id = _next_id()
+        message = {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params}
+
+        try:
+            resp = await self._client.post(
+                self._message_url,
+                json=message,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+            )
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("content-type", "")
+
+            if "text/event-stream" in content_type:
+                return self._parse_sse_body(resp.text, msg_id)
+
+            data = resp.json()
+            if "error" in data:
+                err = data["error"]
+                raise RuntimeError(
+                    f"MCP error {err.get('code', '?')}: {err.get('message', 'unknown')}"
+                )
+            return data.get("result")
+
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Streamable HTTP MCP error: %s — %s",
+                exc.response.status_code,
+                exc.response.text[:300],
+            )
+            return None
+        except httpx.RequestError as exc:
+            logger.error("Streamable HTTP MCP request error: %s", exc)
+            return None
+
+    def _parse_sse_body(self, body: str, expected_id: int) -> dict | None:
+        """Parse a complete SSE body string for the JSON-RPC response matching expected_id."""
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                data_str = line[5:].strip()
+                if not data_str:
+                    continue
+                try:
+                    msg = json.loads(data_str)
+                    if msg.get("id") == expected_id:
+                        if "error" in msg:
+                            err = msg["error"]
+                            raise RuntimeError(
+                                f"MCP error {err.get('code', '?')}: {err.get('message', 'unknown')}"
+                            )
+                        return msg.get("result")
+                except json.JSONDecodeError:
+                    continue
+        return None
+
     async def _send_notification(self, method: str, params: dict) -> None:
-        """POST a JSON-RPC notification (no response expected)."""
+        """Send a JSON-RPC notification (no response expected)."""
         if not self._client or not self._message_url:
             return
 
-        message = {
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        }
+        message = {"jsonrpc": "2.0", "method": method, "params": params}
 
         try:
             await self._client.post(
@@ -462,7 +551,7 @@ class MCPSSEServerProcess:
                 headers={"Content-Type": "application/json"},
             )
         except Exception:
-            logger.debug("SSE notification send failed (non-critical): %s", method)
+            logger.debug("MCP notification send failed (non-critical): %s", method)
 
 class MCPManager:
     """Singleton manager for all MCP server instances."""
