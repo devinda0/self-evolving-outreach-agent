@@ -226,13 +226,15 @@ def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
 
 
 def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a state patch to apply *before* re-running the graph for this action."""
+    """Return a state patch to apply *before* re-running the graph for this action.
+
+    Note: deployment_confirmed is intentionally excluded here. It is passed
+    directly through _run_graph_for_message's input_update so it is applied
+    atomically at graph invocation time and never left in a stale True state
+    in the checkpoint between turns.
+    """
     if action_id in ("deploy_selected", "confirm_selected", "confirm_variants"):
         return {"selected_variant_ids": payload.get("variant_ids", [])}
-    if action_id in ("confirm_deploy", "confirm_deployment"):
-        return {"deployment_confirmed": True}
-    if action_id in ("cancel_deploy", "cancel_deployment"):
-        return {"deployment_confirmed": False}
     if action_id == "confirm_prospects":
         return {"selected_prospect_ids": payload.get("selected_ids", [])}
     if action_id in ("select_all_prospects",):
@@ -305,6 +307,7 @@ async def _run_graph_for_message(
     session_id: str,
     content: str,
     db_state: dict[str, Any],
+    deployment_confirmed: bool = False,
 ) -> None:
     """Invoke the LangGraph graph for one user message turn.
 
@@ -337,6 +340,9 @@ async def _run_graph_for_message(
 
     # Every new turn: inject product context + new user message, reset
     # session_complete so the graph doesn't exit immediately.
+    # Always reset deployment_confirmed unless this turn is explicitly a
+    # deployment confirmation — prevents stale True flag from sending emails
+    # automatically if a prior confirmation run was interrupted.
     input_update: dict[str, Any] = {
         "session_id": session_id,
         "product_name": db_state.get("product_name", ""),
@@ -344,6 +350,7 @@ async def _run_graph_for_message(
         "target_market": db_state.get("target_market", ""),
         "messages": [HumanMessage(content=content)],
         "session_complete": False,
+        "deployment_confirmed": deployment_confirmed,
     }
 
     try:
@@ -507,7 +514,10 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                 content = str(data.get("content", "")).strip()
                 if not content:
                     continue
-                await _run_graph_for_message(websocket, session_id, content, db_state)
+                # User messages never carry a pre-confirmed deployment.
+                await _run_graph_for_message(
+                    websocket, session_id, content, db_state, deployment_confirmed=False
+                )
 
             elif msg_type == "ui_action":
                 raw_action_id = str(data.get("action_id", ""))
@@ -524,7 +534,9 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                 # Clarification responses should re-enter the graph as a user message
                 if payload.get("response"):
                     content = str(payload["response"])
-                    await _run_graph_for_message(websocket, session_id, content, db_state)
+                    await _run_graph_for_message(
+                        websocket, session_id, content, db_state, deployment_confirmed=False
+                    )
                     continue
 
                 # Manual feedback input — build and emit ManualFeedbackInput frame
@@ -546,7 +558,10 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                         action_id,
                         synthetic_msg,
                     )
-                    # Patch state before re-running (e.g. selected_variant_ids)
+                    # Patch state before re-running (e.g. selected_variant_ids).
+                    # Note: deployment_confirmed is intentionally NOT included here —
+                    # it is passed directly via _run_graph_for_message to avoid it
+                    # persisting in the checkpoint between turns.
                     pre_delta = _state_delta_before_rerun(action_id, payload)
                     if pre_delta:
                         graph = _get_or_init_graph()
@@ -557,7 +572,12 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                             logger.warning(
                                 "Could not pre-patch state for '%s'", action_id, exc_info=True
                             )
-                    await _run_graph_for_message(websocket, session_id, synthetic_msg, db_state)
+                    # Only pass deployment_confirmed=True for explicit confirmation actions.
+                    is_confirm = action_id in ("confirm_deploy", "confirm_deployment")
+                    await _run_graph_for_message(
+                        websocket, session_id, synthetic_msg, db_state,
+                        deployment_confirmed=is_confirm,
+                    )
                 else:
                     # Simple state-only updates (segment select, prospect confirm)
                     logger.info(
