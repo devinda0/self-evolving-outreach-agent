@@ -19,9 +19,11 @@ from app.agents.orchestrator import (
     VALID_INTENTS,
     _parse_llm_response,
     _validate_and_normalize_result,
+    answer_node,
     clarify_node,
     format_messages,
     orchestrator_node,
+    update_context_node,
 )
 
 # ---------------------------------------------------------------------------
@@ -472,3 +474,295 @@ class TestClarifyNode:
         assert frame1["instance_id"] != frame2["instance_id"]
         assert frame1["instance_id"].startswith("clarify_")
         assert frame2["instance_id"].startswith("clarify_")
+
+
+# ---------------------------------------------------------------------------
+# Answer node tests
+# ---------------------------------------------------------------------------
+
+
+class TestAnswerNode:
+    """Tests for the answer_node function."""
+
+    async def test_mock_mode_returns_text_frame(self):
+        """Answer node returns a text UI frame in mock mode."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "What is our target market?"}],
+        )
+
+        with patch("app.agents.orchestrator._get_llm", return_value=None):
+            result = await answer_node(state)
+
+        assert result["session_complete"] is True
+        assert result["active_stage_summary"] == "answered user question"
+        frames = result.get("pending_ui_frames", [])
+        assert len(frames) == 1
+        assert frames[0]["type"] == "text"
+        assert frames[0]["component"] == "MessageRenderer"
+
+    async def test_llm_answer_returns_response(self):
+        """Answer node uses LLM to generate an answer from context."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "How many research findings do we have?"}],
+            research_findings=[
+                {"title": "Finding 1", "claim": "Claim A"},
+                {"title": "Finding 2", "claim": "Claim B"},
+            ],
+        )
+
+        mock_llm = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.content = "You currently have 2 research findings: Finding 1 and Finding 2."
+        mock_llm.ainvoke.return_value = mock_response
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await answer_node(state)
+
+        assert result["session_complete"] is True
+        frames = result["pending_ui_frames"]
+        assert len(frames) == 1
+        assert "2 research findings" in frames[0]["props"]["content"]
+
+    async def test_llm_error_returns_fallback(self):
+        """Answer node handles LLM errors gracefully."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "What's going on?"}],
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.side_effect = Exception("API error")
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await answer_node(state)
+
+        assert result["session_complete"] is True
+        frames = result["pending_ui_frames"]
+        assert len(frames) == 1
+        assert "error" in frames[0]["props"]["content"].lower()
+
+    async def test_instance_id_prefix(self):
+        """Answer node generates instance_id with answer_ prefix."""
+        state = _make_state()
+
+        with patch("app.agents.orchestrator._get_llm", return_value=None):
+            result = await answer_node(state)
+
+        frame = result["pending_ui_frames"][0]
+        assert frame["instance_id"].startswith("answer_")
+
+
+# ---------------------------------------------------------------------------
+# Update-context node tests
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateContextNode:
+    """Tests for the update_context_node function."""
+
+    async def test_mock_mode_returns_confirmation(self):
+        """Update-context node returns a confirmation in mock mode."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "Our company focuses on B2B SaaS"}],
+        )
+
+        with patch("app.agents.orchestrator._get_llm", return_value=None):
+            result = await update_context_node(state)
+
+        assert result["session_complete"] is True
+        assert "context updated" in result["active_stage_summary"]
+        frames = result.get("pending_ui_frames", [])
+        assert len(frames) == 1
+        assert frames[0]["component"] == "MessageRenderer"
+
+    async def test_llm_updates_product_description(self):
+        """Update-context node enriches product_description with new info."""
+        state = _make_state(
+            product_description="A CRM tool",
+            messages=[
+                {"role": "user", "content": "Our product also has AI-powered analytics"},
+            ],
+        )
+
+        mock_llm = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.content = json.dumps(
+            {
+                "updates": {
+                    "product_name": None,
+                    "product_description": "with AI-powered analytics features",
+                    "target_market": None,
+                },
+                "confirmation": "Got it — your product includes AI-powered analytics.",
+                "follow_up_questions": [],
+                "has_remaining_gaps": False,
+            }
+        )
+        mock_llm.ainvoke.return_value = mock_response
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await update_context_node(state)
+
+        assert "AI-powered analytics" in result["product_description"]
+        # Should enrich existing, not replace
+        assert "A CRM tool" in result["product_description"]
+
+    async def test_llm_updates_target_market(self):
+        """Update-context node updates target_market field."""
+        state = _make_state(
+            messages=[
+                {"role": "user", "content": "Actually our target market is enterprise HR teams"},
+            ],
+        )
+
+        mock_llm = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.content = json.dumps(
+            {
+                "updates": {
+                    "product_name": None,
+                    "product_description": None,
+                    "target_market": "Enterprise HR teams",
+                },
+                "confirmation": "Updated — targeting enterprise HR teams.",
+                "follow_up_questions": [],
+                "has_remaining_gaps": False,
+            }
+        )
+        mock_llm.ainvoke.return_value = mock_response
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await update_context_node(state)
+
+        assert result["target_market"] == "Enterprise HR teams"
+
+    async def test_follow_up_questions_create_text_frame(self):
+        """Update-context node shows follow-up questions as plain text (not buttons)."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "We sell to startups"}],
+        )
+
+        mock_llm = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.content = json.dumps(
+            {
+                "updates": {
+                    "product_name": None,
+                    "product_description": None,
+                    "target_market": "Startups",
+                },
+                "confirmation": "Noted — targeting startups.",
+                "follow_up_questions": [
+                    "What stage startups? (seed, Series A, etc.)",
+                    "Any specific industry vertical?",
+                ],
+                "has_remaining_gaps": True,
+            }
+        )
+        mock_llm.ainvoke.return_value = mock_response
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await update_context_node(state)
+
+        frames = result["pending_ui_frames"]
+        # Should have confirmation + follow-up as plain text (not ClarificationPrompt)
+        assert len(frames) == 2
+        assert frames[0]["component"] == "MessageRenderer"
+        assert frames[1]["component"] == "MessageRenderer"
+        assert frames[1]["type"] == "text"
+        assert "follow-up questions" in frames[1]["props"]["content"]
+        assert frames[1]["actions"] == []
+
+    async def test_llm_error_returns_fallback(self):
+        """Update-context handles LLM errors gracefully."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "Some clarification"}],
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.side_effect = Exception("API error")
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await update_context_node(state)
+
+        assert result["session_complete"] is True
+        assert "failed" in result["active_stage_summary"]
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator classifies new intents correctly
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorNewIntents:
+    """Tests for answer and update_context intent classification."""
+
+    @pytest.fixture
+    def mock_llm_response(self):
+        """Create a mock LLM response."""
+
+        def _create_response(intent: str, **kwargs):
+            response_data = {
+                "current_intent": intent,
+                "reasoning": f"User wants to {intent}",
+                "clarification_question": kwargs.get("question"),
+                "clarification_options": kwargs.get("options", []),
+                "next_node": kwargs.get("next_node", intent),
+            }
+            mock = MagicMock()
+            mock.content = json.dumps(response_data)
+            return mock
+
+        return _create_response
+
+    async def test_answer_intent(self, mock_llm_response):
+        """User asks a direct question → answer intent."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "What is our target market?"}],
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.return_value = mock_llm_response("answer", next_node="answer")
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await orchestrator_node(state)
+
+        assert result["current_intent"] == "answer"
+        assert result["next_node"] == "answer"
+
+    async def test_update_context_intent(self, mock_llm_response):
+        """User provides clarification → update_context intent."""
+        state = _make_state(
+            messages=[
+                {"role": "user", "content": "Our company is a B2B SaaS for HR teams"},
+            ],
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.return_value = mock_llm_response(
+            "update_context", next_node="update_context"
+        )
+
+        with patch("app.agents.orchestrator._get_llm", return_value=mock_llm):
+            result = await orchestrator_node(state)
+
+        assert result["current_intent"] == "update_context"
+        assert result["next_node"] == "update_context"
+
+    def test_valid_intents_includes_new_modes(self):
+        """VALID_INTENTS includes answer and update_context."""
+        assert "answer" in VALID_INTENTS
+        assert "update_context" in VALID_INTENTS
+
+    def test_validate_normalize_answer(self):
+        """Validate that answer intent normalizes correctly."""
+        result = {"current_intent": "answer", "next_node": "answer"}
+        normalized = _validate_and_normalize_result(result)
+        assert normalized["current_intent"] == "answer"
+        assert normalized["next_node"] == "answer"
+
+    def test_validate_normalize_update_context(self):
+        """Validate that update_context intent normalizes correctly."""
+        result = {"current_intent": "update_context", "next_node": "update_context"}
+        normalized = _validate_and_normalize_result(result)
+        assert normalized["current_intent"] == "update_context"
+        assert normalized["next_node"] == "update_context"

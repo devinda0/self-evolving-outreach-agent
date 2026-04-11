@@ -15,7 +15,12 @@ from app.agents.checkpointer import MongoDBSaver
 from app.agents.content_agent import content_agent_node
 from app.agents.deployment_agent import deployment_agent_node
 from app.agents.feedback_agent import feedback_agent_node
-from app.agents.orchestrator import clarify_node, orchestrator_node
+from app.agents.orchestrator import (
+    answer_node,
+    clarify_node,
+    orchestrator_node,
+    update_context_node,
+)
 from app.agents.research import (
     research_dispatcher_node,
     research_synthesizer_node,
@@ -54,6 +59,8 @@ def route_from_orchestrator(state: CampaignState) -> str:
         "deploy",
         "feedback",
         "clarify",
+        "answer",
+        "update_context",
     ):
         logger.info(
             "route_from_orchestrator → %s | session=%s intent=%s",
@@ -117,6 +124,8 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_node("deployment_agent", deployment_agent_node)
     builder.add_node("feedback_agent", feedback_agent_node)
     builder.add_node("clarify", clarify_node)
+    builder.add_node("answer", answer_node)
+    builder.add_node("update_context", update_context_node)
 
     # -- Entry point --
     builder.set_entry_point("orchestrator")
@@ -135,6 +144,8 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
             "deploy": "deployment_agent",
             "feedback": "feedback_agent",
             "clarify": "clarify",
+            "answer": "answer",
+            "update_context": "update_context",
             END: END,
         },
     )
@@ -152,6 +163,8 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_edge("deployment_agent", END)
     builder.add_edge("feedback_agent", END)
     builder.add_edge("clarify", END)
+    builder.add_edge("answer", END)
+    builder.add_edge("update_context", END)
 
     return builder.compile(checkpointer=checkpointer)
 

@@ -17,7 +17,7 @@ from app.agents.graph import (
     research_fan_out,
     route_from_orchestrator,
 )
-from app.agents.orchestrator import clarify_node, orchestrator_node
+from app.agents.orchestrator import answer_node, clarify_node, orchestrator_node, update_context_node
 from app.agents.research import (
     research_dispatcher_node,
     research_synthesizer_node,
@@ -105,6 +105,8 @@ def test_build_graph_compiles():
         ("deploy", "deploy"),
         ("feedback", "feedback"),
         ("clarify", "clarify"),
+        ("answer", "answer"),
+        ("update_context", "update_context"),
     ],
 )
 def test_route_from_orchestrator(next_node, expected):
@@ -344,6 +346,33 @@ async def test_clarify_node_returns_question():
     result = await clarify_node(_make_state())
     assert "clarification_question" in result
     assert result["active_stage_summary"] == "awaiting clarification"
+    assert "pending_ui_frames" in result
+
+
+async def test_answer_node_returns_text_frame():
+    """Answer node returns a text UI frame with session_complete=True."""
+    from unittest.mock import patch
+
+    state = _make_state(messages=[{"role": "user", "content": "What is our target market?"}])
+    with patch("app.agents.orchestrator._get_llm", return_value=None):
+        result = await answer_node(state)
+    assert result["session_complete"] is True
+    assert result["active_stage_summary"] == "answered user question"
+    assert "pending_ui_frames" in result
+    assert result["pending_ui_frames"][0]["component"] == "MessageRenderer"
+
+
+async def test_update_context_node_returns_confirmation():
+    """Update-context node returns a confirmation frame with session_complete=True."""
+    from unittest.mock import patch
+
+    state = _make_state(
+        messages=[{"role": "user", "content": "Our company focuses on B2B SaaS"}],
+    )
+    with patch("app.agents.orchestrator._get_llm", return_value=None):
+        result = await update_context_node(state)
+    assert result["session_complete"] is True
+    assert "context updated" in result["active_stage_summary"]
     assert "pending_ui_frames" in result
 
 

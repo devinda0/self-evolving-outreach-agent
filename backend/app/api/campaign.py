@@ -52,6 +52,8 @@ _PROGRESS_NODES = frozenset(
         "deployment_agent",
         "feedback_agent",
         "clarify",
+        "answer",
+        "update_context",
     }
 )
 
@@ -356,7 +358,7 @@ async def _run_graph_for_message(
                     else ""
                 )
                 # Skip nodes that produce structured JSON, not user-facing prose
-                if node in ("orchestrator", "clarify", "content_agent", "deployment_agent"):
+                if node in ("orchestrator", "clarify", "content_agent", "deployment_agent", "answer", "update_context"):
                     continue
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
