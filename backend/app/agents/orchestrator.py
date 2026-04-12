@@ -102,6 +102,7 @@ When the user mentions cycles:
 - "make it more casual" or "shorten the emails" or "rewrite the subject lines" or "change the tone to professional" or "make it punchier" → "content_refine" (ONLY when variants exist)
 - If no content variants exist yet and user asks for content modifications → "generate" (treat as new generation request)
 - If user asks a direct question (e.g. "what is our target market?", "how many variants did we create?", "what should I focus on?") → "answer"
+- If user asks about replies, received emails, engagement status, or campaign metrics (e.g. "are there any replies?", "did anyone respond?", "what are the received emails?", "show me engagement results", "is there any reply from X?", "check for responses", "what is the current status?") → "answer"
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
 - Only use "clarify" as a last resort when the message is truly unintelligible or has multiple conflicting interpretations
@@ -488,28 +489,30 @@ ANSWER_SYSTEM_PROMPT = """You are a helpful assistant for the Signal to Action g
 Answer the user's question directly and concisely using ONLY the campaign context provided below.
 If the information is not available in the context, say so honestly rather than guessing.
 Do NOT perform research, generate content, or take any actions — just answer the question.
-Keep answers focused and brief (1-3 paragraphs max)."""
+Keep answers focused and brief (1-3 paragraphs max).
+
+IMPORTANT: When the user asks about replies, received emails, engagement, or feedback:
+- Always check the "Feedback Events from DB" and "Email Threads" sections for the latest data.
+- These are real-time records from the database and take precedence over state-level summaries.
+- Report specific details: who replied, what they said, when, email subject, etc."""
 
 
-async def answer_node(state: CampaignState) -> dict[str, Any]:
-    """Answer a user question directly from campaign context.
+async def _build_answer_context(state: CampaignState) -> str:
+    """Build rich context for the answer node by combining state AND live DB data.
 
-    Uses the LLM to generate a contextual answer based on the current campaign
-    state — research findings, variants, deployment records, etc.
-
-    Args:
-        state: Current campaign state.
-
-    Returns:
-        State update with the answer as an AI message and UI frame.
+    Webhooks write feedback events and email threads directly to MongoDB,
+    bypassing LangGraph state. This function ensures the answer node sees
+    ALL data — both from state and from the database.
     """
+    from app.db.crud import (
+        get_deployment_records_for_session,
+        get_email_threads_for_session,
+        get_feedback_events_for_session,
+        get_reply_events_for_session,
+    )
+
     session_id = state.get("session_id", "unknown")
-    logger.info("answer_node called | session=%s", session_id)
 
-    bundle = await memory_manager.build_context_bundle(state, "orchestrator")
-    context_messages = bundle.get("recent_messages", [])
-
-    # Build rich context for answering
     context_parts = [
         f"Product: {state.get('product_name', 'Unknown')}",
         f"Description: {state.get('product_description', 'No description')}",
@@ -538,15 +541,107 @@ async def answer_node(state: CampaignState) -> dict[str, Any]:
             label = v.get("angle_label", "unknown") if isinstance(v, dict) else str(v)
             context_parts.append(f"  - {label}")
 
-    # Include deployment records if available
-    records = state.get("deployment_records", [])
-    if records:
-        context_parts.append(f"\nDeployment Records: {len(records)} sends")
+    # --- Live DB data (resilient to DB unavailability) ---
+    db_records: list[dict] = []
+    db_events: list[dict] = []
+    db_threads: list[dict] = []
+    db_replies: list[dict] = []
 
-    # Include feedback if available
-    feedback = state.get("engagement_results", [])
-    if feedback:
-        context_parts.append(f"\nEngagement Results: {len(feedback)} events")
+    try:
+        db_records = await get_deployment_records_for_session(session_id)
+        db_events = await get_feedback_events_for_session(session_id)
+        db_threads = await get_email_threads_for_session(session_id)
+        db_replies = await get_reply_events_for_session(session_id)
+    except Exception:
+        logger.warning("_build_answer_context: DB unavailable, using state-only context")
+
+    # --- Deployment records ---
+    state_records = state.get("deployment_records", [])
+    records = db_records if db_records else state_records
+
+    if records:
+        context_parts.append(f"\nDeployment Records ({len(records)} sends):")
+        for rec in records[:20]:
+            prospect_email = rec.get("prospect_email", rec.get("recipient_email", "unknown"))
+            prospect_name = rec.get("prospect_name", "")
+            status = rec.get("status", "unknown")
+            channel = rec.get("channel", "email")
+            variant_id = rec.get("variant_id", "")
+            sent_at = rec.get("sent_at", "")
+            subject = rec.get("subject", "")
+            detail = f"  - To: {prospect_name} <{prospect_email}> | status: {status} | channel: {channel}"
+            if subject:
+                detail += f" | subject: {subject}"
+            if variant_id:
+                detail += f" | variant: {variant_id}"
+            if sent_at:
+                detail += f" | sent: {sent_at}"
+            context_parts.append(detail)
+
+    # --- Feedback events ---
+    state_events = state.get("engagement_results", [])
+    all_events = db_events if db_events else state_events
+
+    if all_events:
+        context_parts.append(f"\nFeedback Events from DB ({len(all_events)} total):")
+        # Group by event type for clarity
+        by_type: dict[str, list] = {}
+        for evt in all_events:
+            et = evt.get("event_type", "unknown")
+            by_type.setdefault(et, []).append(evt)
+        for et, evts in by_type.items():
+            context_parts.append(f"  {et}: {len(evts)} events")
+            for evt in evts[:10]:
+                prospect_id = evt.get("prospect_id", "")
+                received = evt.get("received_at", "")
+                detail = f"    - prospect={prospect_id} received={received}"
+                if et == "reply":
+                    body = evt.get("reply_body") or evt.get("qualitative_signal") or ""
+                    subject = evt.get("reply_subject", "")
+                    if subject:
+                        detail += f" subject=\"{subject}\""
+                    if body:
+                        detail += f" body=\"{body[:200]}\""
+                context_parts.append(detail)
+
+    # --- Email threads (includes full reply content) ---
+    if db_threads:
+        context_parts.append(f"\nEmail Threads ({len(db_threads)} threads):")
+        for thread in db_threads[:10]:
+            prospect_email = thread.get("prospect_email", "unknown")
+            status = thread.get("status", "unknown")
+            reply_count = thread.get("reply_count", 0)
+            subject = thread.get("subject", "")
+            context_parts.append(
+                f"  Thread with {prospect_email} | status: {status} | "
+                f"replies: {reply_count} | subject: {subject}"
+            )
+            for msg in thread.get("messages", [])[:5]:
+                direction = msg.get("direction", "unknown")
+                sender = msg.get("sender_email", "")
+                body = msg.get("body_text", "")
+                ts = msg.get("timestamp", "")
+                msg_subject = msg.get("subject", "")
+                context_parts.append(
+                    f"    [{direction}] from={sender} at={ts}"
+                    + (f" subject=\"{msg_subject}\"" if msg_subject else "")
+                    + (f"\n      \"{body[:300]}\"" if body else "")
+                )
+
+    # --- Reply events specifically ---
+    if db_replies and not db_threads:
+        # Only add this section if we didn't already get threads above
+        context_parts.append(f"\nReply Events ({len(db_replies)} replies):")
+        for reply in db_replies[:10]:
+            from_info = reply.get("prospect_id", "unknown")
+            body = reply.get("reply_body") or reply.get("qualitative_signal") or ""
+            subject = reply.get("reply_subject", "")
+            received = reply.get("received_at", "")
+            context_parts.append(
+                f"  - From prospect {from_info} at {received}"
+                + (f" | subject: {subject}" if subject else "")
+                + (f"\n    \"{body[:300]}\"" if body else "")
+            )
 
     # Include cycle history if available
     cycle_records = state.get("cycle_records", [])
@@ -567,14 +662,35 @@ async def answer_node(state: CampaignState) -> dict[str, Any]:
     # Include accumulated learnings
     accumulated = state.get("accumulated_learnings")
     if accumulated:
-        # Extract just the directives section for conciseness
         directives_start = accumulated.find("=== DIRECTIVES FOR NEXT CYCLE ===")
         if directives_start >= 0:
             context_parts.append(f"\nAccumulated Learnings:\n{accumulated[directives_start:directives_start + 500]}")
         else:
             context_parts.append(f"\nAccumulated Learnings: {accumulated[:300]}")
 
-    context_str = "\n".join(context_parts)
+    return "\n".join(context_parts)
+
+
+async def answer_node(state: CampaignState) -> dict[str, Any]:
+    """Answer a user question directly from campaign context and live DB data.
+
+    Queries MongoDB for feedback events, email threads, and deployment records
+    so that webhook-delivered data (replies, opens, clicks) is always visible.
+
+    Args:
+        state: Current campaign state.
+
+    Returns:
+        State update with the answer as an AI message and UI frame.
+    """
+    session_id = state.get("session_id", "unknown")
+    logger.info("answer_node called | session=%s", session_id)
+
+    bundle = await memory_manager.build_context_bundle(state, "orchestrator")
+    context_messages = bundle.get("recent_messages", [])
+
+    # Build rich context including live DB data
+    context_str = await _build_answer_context(state)
 
     llm = _get_llm()
 
