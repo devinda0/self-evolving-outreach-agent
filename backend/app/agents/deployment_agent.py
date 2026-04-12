@@ -20,7 +20,7 @@ from uuid import uuid4
 import httpx
 
 from app.core.config import settings
-from app.db.crud import save_deployment_record, upsert_email_thread
+from app.db.crud import get_prospect_cards, save_deployment_record, upsert_email_thread
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import DeploymentRecord, EmailThread, EmailThreadMessage
@@ -396,23 +396,79 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     # Filter out prospects without email
     selected_prospects = [p for p in selected_prospects if p.get("email")]
 
+    # DB fallback: for older sessions where prospect_cards were saved without email,
+    # reload from DB and merge the email field in.
+    if not selected_prospects and session_id:
+        logger.info(
+            "deployment_agent_node: no email-bearing prospects in state — attempting DB fallback | session=%s",
+            session_id,
+        )
+        try:
+            db_cards = await get_prospect_cards(session_id)
+            if db_cards:
+                # Re-resolve from DB cards
+                db_by_id = {c["id"]: c for c in db_cards if c.get("id")}
+                # Merge email into existing state cards
+                merged = []
+                for p in (all_prospects or db_cards):
+                    pid = p.get("id")
+                    db_p = db_by_id.get(pid, {})
+                    email = p.get("email") or db_p.get("email")
+                    if email:
+                        merged.append({**p, **db_p, "email": email})
+                # Re-apply selected_prospect_ids filter
+                if selected_prospect_ids:
+                    merged = [p for p in merged if p.get("id") in selected_prospect_ids]
+                if merged:
+                    selected_prospects = merged
+                    logger.info(
+                        "deployment_agent_node: DB fallback resolved %d prospects with email | session=%s",
+                        len(selected_prospects),
+                        session_id,
+                    )
+        except Exception as exc:
+            logger.warning("deployment_agent_node: DB fallback failed (%s) | session=%s", exc, session_id)
+
     # -- Guard: need at least variants and prospects --
     if not selected_variants:
         logger.warning("deployment_agent_node: no variants available | session=%s", session_id)
+        error_text = "I couldn't find any content variants to send. Please generate content first, then try deploying again."
         return {
             "next_node": "orchestrator",
             "session_complete": True,
             "error_messages": [
                 "No content variants found. Please generate content before deploying."
             ],
+            "pending_ui_frames": [
+                UIFrame(
+                    type="text",
+                    component="MessageRenderer",
+                    instance_id=f"deploy_err_{uuid4().hex[:8]}",
+                    props={"content": error_text, "role": "assistant"},
+                    actions=[],
+                ).model_dump()
+            ],
         }
 
     if not selected_prospects:
         logger.warning("deployment_agent_node: no prospects available | session=%s", session_id)
+        error_text = (
+            "I couldn't find any prospects with email addresses to send to. "
+            "Please make sure your prospects have email addresses set, then try again."
+        )
         return {
             "next_node": "orchestrator",
             "session_complete": True,
             "error_messages": ["No prospects found. Please run segmentation before deploying."],
+            "pending_ui_frames": [
+                UIFrame(
+                    type="text",
+                    component="MessageRenderer",
+                    instance_id=f"deploy_err_{uuid4().hex[:8]}",
+                    props={"content": error_text, "role": "assistant"},
+                    actions=[],
+                ).model_dump()
+            ],
         }
 
     # -- If not yet confirmed, emit DeploymentConfirm and wait --
@@ -427,6 +483,12 @@ async def deployment_agent_node(state: CampaignState) -> dict:
                     session_id,
                     production_errors,
                 )
+                error_lines = "\n".join(f"• {e}" for e in production_errors)
+                error_text = (
+                    "Production email sending is enabled but the configuration is incomplete:\n\n"
+                    f"{error_lines}\n\n"
+                    "Set `USE_MOCK_SEND=true` to use mock mode, or fix the issues above."
+                )
                 return {
                     "next_node": "orchestrator",
                     "session_complete": True,
@@ -434,6 +496,15 @@ async def deployment_agent_node(state: CampaignState) -> dict:
                         "Production email sending is enabled but configuration is incomplete:",
                         *production_errors,
                         "Set USE_MOCK_SEND=true to use mock mode, or fix the issues above.",
+                    ],
+                    "pending_ui_frames": [
+                        UIFrame(
+                            type="text",
+                            component="MessageRenderer",
+                            instance_id=f"deploy_err_{uuid4().hex[:8]}",
+                            props={"content": error_text, "role": "assistant"},
+                            actions=[],
+                        ).model_dump()
                     ],
                 }
 

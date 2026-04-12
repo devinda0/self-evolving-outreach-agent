@@ -169,12 +169,21 @@ def _new_campaign_state(session_id: str, req: StartCampaignRequest) -> dict[str,
 
 
 def _normalize_action_id(action_id: str) -> str:
-    """Normalize action IDs: strip ``select-`` prefix for dynamic segment
-    selection buttons and convert remaining hyphens to underscores so
-    frontend IDs (``confirm-prospects``) match backend keys
-    (``confirm_prospects``)."""
-    # SegmentSelector buttons arrive as "select-<segment_id>"
-    if action_id.startswith("select-") and action_id != "select-all":
+    """Normalize action IDs: handle dynamic prefixes and convert hyphens to
+    underscores so frontend IDs (``confirm-prospects``) match backend keys
+    (``confirm_prospects``).
+
+    Specific prefix rules (evaluated in order):
+    - ``select-var-`` → ``select_variant``   (VariantGrid selection)
+    - ``select-seg-`` → ``select_segment``   (SegmentSelector)
+    - ``select-``     → ``select_segment``   (other legacy segment buttons)
+    - anything else   → replace ``-`` with ``_``
+    """
+    if action_id.startswith("select-var-"):
+        return "select_variant"
+    if action_id.startswith("select-seg-") or (
+        action_id.startswith("select-") and action_id != "select-all"
+    ):
         return "select_segment"
     return action_id.replace("-", "_")
 
@@ -702,6 +711,31 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                 # View quarantine — fetch events and emit QuarantineViewer frame
                 if action_id == "view_quarantine":
                     await _handle_view_quarantine_action(websocket, session_id)
+                    continue
+
+                # Variant selection toggle — read current state, append/remove, write back
+                if action_id == "select_variant":
+                    variant_id = payload.get("variant_id", "")
+                    if variant_id:
+                        _g = _get_or_init_graph()
+                        _cfg_v: RunnableConfig = {"configurable": {"thread_id": session_id}}
+                        try:
+                            _snap_v = await _g.aget_state(_cfg_v)  # type: ignore[arg-type]
+                            current_sel: list[str] = []
+                            if _snap_v and _snap_v.values:
+                                current_sel = list(_snap_v.values.get("selected_variant_ids", []) or [])
+                            if variant_id in current_sel:
+                                current_sel.remove(variant_id)
+                            else:
+                                current_sel.append(variant_id)
+                            await _g.aupdate_state(_cfg_v, {"selected_variant_ids": current_sel})  # type: ignore[arg-type]
+                            logger.info(
+                                "select_variant: toggled %s → selected=%s | session=%s",
+                                variant_id, current_sel, session_id,
+                            )
+                        except Exception:
+                            logger.warning("select_variant: state update failed", exc_info=True)
+                    await _send_json_safe(websocket, {"type": "token_end"})
                     continue
 
                 # Actions that require a graph re-run (navigation, deploy, confirm)
