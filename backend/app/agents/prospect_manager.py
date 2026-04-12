@@ -19,10 +19,17 @@ import re
 import uuid
 from typing import Any
 
+from app.agents.prospect_discovery import (
+    calculate_weighted_fit_score,
+    deduplicate_prospects,
+    discover_prospects_via_research,
+)
+from app.agents.segment_agent import calculate_urgency_score, recommend_angle, recommend_channel
 from app.core.llm import get_llm
 from app.db.crud import get_prospect_cards, save_prospect_cards
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
+from app.models.prospect import Segment
 from app.models.ui_frames import UIAction, UIFrame
 
 logger = logging.getLogger(__name__)
@@ -37,6 +44,7 @@ PROSPECT_MANAGE_SYSTEM_PROMPT = """You are the Prospect Manager for Signal to Ac
 Your job: interpret the user's message about prospect management and return a structured action.
 
 ## Available Actions
+- discover_prospects: user wants to find, search for, or automatically discover new prospects using research and web search tools. Use this for ANY message that says "find prospects", "discover prospects", "search for prospects", "can you find some prospects", "look up prospects", "find me targets", etc.
 - view_prospects: user wants to see the current prospect list or selected prospects
 - add_prospect: user wants to add one or more prospects manually (by name, email, company, title)
 - remove_prospect: user wants to remove one or more prospects from the list
@@ -139,6 +147,77 @@ def _match_prospect_by_email(
     return None
 
 
+async def _run_prospect_discovery(state: CampaignState) -> list[dict[str, Any]]:
+    """Use research findings + web search to discover and score new prospects.
+
+    Returns a list of scored prospect card dicts ready for display.
+    """
+    product_name = state.get("product_name", "")
+    target_market = state.get("target_market", "")
+    research_findings = state.get("research_findings", [])
+
+    logger.info(
+        "_run_prospect_discovery: product=%s market=%s findings=%d",
+        product_name, target_market, len(research_findings),
+    )
+
+    try:
+        raw = await discover_prospects_via_research(
+            product_name=product_name,
+            target_market=target_market,
+            research_findings=research_findings,
+            num_prospects=10,
+        )
+    except Exception as exc:
+        logger.warning("_run_prospect_discovery: discovery failed (%s) — using seed list", exc)
+        from app.agents.segment_agent import DEMO_SEED_PROSPECTS
+        raw = list(DEMO_SEED_PROSPECTS)
+
+    if not raw:
+        from app.agents.segment_agent import DEMO_SEED_PROSPECTS
+        raw = list(DEMO_SEED_PROSPECTS)
+
+    # Score and build cards (lightweight — no full Segment object required)
+    dummy_segment = Segment(
+        id="seg-discover",
+        session_id=state.get("session_id", ""),
+        label="Discovered",
+        description="Prospects found via automated discovery",
+        criteria={},
+        prospect_count=0,
+    )
+
+    scored: list[dict[str, Any]] = []
+    for raw_p in raw:
+        prospect_id = f"prospect-{uuid.uuid4().hex[:8]}"
+        fit, _ = calculate_weighted_fit_score(raw_p, dummy_segment, research_findings, target_market)
+        urgency = calculate_urgency_score(raw_p, research_findings)
+        angle = recommend_angle(raw_p, research_findings)
+        channel = recommend_channel(raw_p, dummy_segment)
+        scored.append({
+            "id": prospect_id,
+            "name": raw_p.get("name", ""),
+            "email": raw_p.get("email"),
+            "linkedin_url": raw_p.get("linkedin_url"),
+            "title": raw_p.get("title", ""),
+            "company": raw_p.get("company", ""),
+            "fit_score": round(fit, 2),
+            "urgency_score": round(urgency, 2),
+            "angle_recommendation": angle,
+            "channel_recommendation": channel,
+            "personalization_fields": {},
+            "source": raw_p.get("source", "discovery"),
+            "discovery_query": raw_p.get("rationale"),
+        })
+
+    # Deduplicate
+    scored = deduplicate_prospects(scored)
+    scored.sort(key=lambda p: p["fit_score"] + p["urgency_score"], reverse=True)
+
+    logger.info("_run_prospect_discovery: found %d prospects", len(scored))
+    return scored
+
+
 def _create_manual_prospect(data: dict[str, Any]) -> dict[str, Any]:
     """Create a scored prospect dict from manual input."""
     prospect_id = f"prospect-{uuid.uuid4().hex[:8]}"
@@ -163,11 +242,15 @@ def _create_manual_prospect(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_prospect_card(prospect: dict[str, Any]) -> dict[str, Any]:
-    """Build a compact prospect card for UI display."""
+    """Build a compact prospect card for UI display.
+
+    Includes email and linkedin_url so the deployment agent can send messages.
+    """
     return {
         "id": prospect["id"],
         "name": prospect["name"],
         "email": prospect.get("email"),
+        "linkedin_url": prospect.get("linkedin_url"),
         "title": prospect.get("title", ""),
         "company": prospect.get("company", ""),
         "fit_score": prospect.get("fit_score", 0.5),
@@ -203,7 +286,19 @@ def _execute_actions(
             for p_data in action.get("prospects", []):
                 if not p_data.get("name"):
                     continue
-                new_prospect = _create_manual_prospect(p_data)
+                # If the dict already has a scored id (from discovery), use it directly
+                if p_data.get("id") and p_data.get("fit_score") is not None:
+                    new_prospect = p_data
+                else:
+                    new_prospect = _create_manual_prospect(p_data)
+                # Skip duplicates (same id or same email already in cards)
+                existing_ids = {c["id"] for c in cards}
+                existing_emails = {(c.get("email") or "").lower() for c in cards if c.get("email")}
+                p_email = (new_prospect.get("email") or "").lower()
+                if new_prospect["id"] in existing_ids:
+                    continue
+                if p_email and p_email in existing_emails:
+                    continue
                 cards.append(new_prospect)
                 sel_ids.append(new_prospect["id"])
                 logs.append(f"Added {new_prospect['name']}")
@@ -439,6 +534,39 @@ async def prospect_manage_node(state: CampaignState) -> dict:
                 latest_msg, current_cards, selected_ids
             )
 
+    # If the LLM wants to discover prospects, run async discovery first and
+    # inject the results as add_prospect actions so _execute_actions can handle them.
+    has_discover = any(a.get("type") == "discover_prospects" for a in actions)
+    if has_discover:
+        logger.info("prospect_manage_node: running automated prospect discovery | session=%s", session_id)
+        try:
+            discovered = await _run_prospect_discovery(state)
+            if discovered:
+                # Replace the discover action with add_prospect for each found prospect
+                actions = [a for a in actions if a.get("type") != "discover_prospects"]
+                actions.append({
+                    "type": "add_prospect",
+                    "prospects": discovered,
+                })
+                if not response_message or "find" in response_message.lower():
+                    response_message = (
+                        f"Found {len(discovered)} prospects using research and web search tools. "
+                        "Review and select the ones you'd like to target below."
+                    )
+            else:
+                actions = [a for a in actions if a.get("type") != "discover_prospects"]
+                response_message = (
+                    "Could not find specific prospects automatically. "
+                    "You can add them manually or upload a CSV file."
+                )
+        except Exception as exc:
+            logger.error("prospect_manage_node: discovery error: %s", exc)
+            actions = [a for a in actions if a.get("type") != "discover_prospects"]
+            response_message = (
+                "Prospect discovery encountered an error. "
+                "You can add prospects manually or upload a CSV file."
+            )
+
     # Execute the actions
     updated_cards, updated_selected, logs = _execute_actions(
         actions, current_cards, selected_ids
@@ -529,6 +657,10 @@ def _parse_mock_commands(
     msg_lower = message.lower().strip()
     actions: list[dict[str, Any]] = []
     show_csv = False
+
+    if any(kw in msg_lower for kw in ("find", "discover", "search for", "look up", "locate")):
+        actions.append({"type": "discover_prospects"})
+        return actions, "Searching for prospects using research and web tools...", show_csv
 
     if any(kw in msg_lower for kw in ("show", "view", "list", "who", "current")):
         actions.append({"type": "view_prospects"})
