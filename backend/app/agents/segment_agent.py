@@ -449,12 +449,17 @@ async def score_prospects(
 
 
 def build_prospect_card(prospect: dict[str, Any]) -> dict[str, Any]:
-    """Build a compact prospect card for the ProspectPicker UI."""
+    """Build a compact prospect card for the ProspectPicker UI.
+
+    Includes email and linkedin_url so the deployment agent can send messages.
+    """
     return {
         "id": prospect["id"],
         "name": prospect["name"],
         "title": prospect.get("title", ""),
         "company": prospect.get("company", ""),
+        "email": prospect.get("email"),
+        "linkedin_url": prospect.get("linkedin_url"),
         "fit_score": prospect["fit_score"],
         "urgency_score": prospect["urgency_score"],
         "angle_recommendation": prospect["angle_recommendation"],

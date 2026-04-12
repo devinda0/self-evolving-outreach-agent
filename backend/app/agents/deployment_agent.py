@@ -12,6 +12,7 @@ Handles:
 import asyncio
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
@@ -61,6 +62,27 @@ def build_ab_split_plan(variants: list[dict], prospects: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
+_LEADING_GREETING_RE = re.compile(
+    r"^\s*(Hi|Hello|Hey|Dear)\s+[^\n,]{0,60}[,]?\s*\n+",
+    re.IGNORECASE,
+)
+
+_LEADING_GREETING_HTML_RE = re.compile(
+    r"^\s*<p>\s*(Hi|Hello|Hey|Dear)\s+[^<]{0,60}[,]?\s*</p>\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_leading_greeting(text: str) -> str:
+    """Remove an opening 'Hi name,' line so we don't double-greet."""
+    return _LEADING_GREETING_RE.sub("", text).strip()
+
+
+def _strip_leading_greeting_html(html: str) -> str:
+    """Remove an opening <p>Hi name,</p> block from HTML content."""
+    return _LEADING_GREETING_HTML_RE.sub("", html).strip()
+
+
 def _apply_tokens(text: str, prospect: dict) -> str:
     """Replace {{first_name}} and {{company}} tokens in any string."""
     name = prospect.get("name", "")
@@ -71,11 +93,23 @@ def _apply_tokens(text: str, prospect: dict) -> str:
     return text
 
 
+def _get_signature() -> str:
+    """Return the configured email signature string."""
+    sig = getattr(settings, "EMAIL_SIGNATURE", None)
+    return sig if sig else "The Team"
+
+
 def personalize_variant(variant: dict, prospect: dict) -> str:
-    """Return a plain text email body with greeting and signature."""
-    body = _apply_tokens(variant.get("body", ""), prospect)
-    greeting = f"Hi {prospect.get('name', 'there')},\n\n"
-    signature = f"\n\nBest regards,\n{settings.EMAIL_SIGNATURE if hasattr(settings, 'EMAIL_SIGNATURE') and settings.EMAIL_SIGNATURE else 'The Team'}"
+    """Return a plain-text email body with greeting and signature.
+
+    Strips any greeting the LLM may have included to avoid doubling it.
+    """
+    raw_body = variant.get("body", "")
+    body = _apply_tokens(raw_body, prospect)
+    body = _strip_leading_greeting(body)
+    name = prospect.get("name") or "there"
+    greeting = f"Hi {name},\n\n"
+    signature = f"\n\nBest regards,\n{_get_signature()}"
     return f"{greeting}{body}{signature}"
 
 
@@ -84,18 +118,32 @@ def personalize_variant_html(variant: dict, prospect: dict) -> str:
 
     Uses ``html_body`` if present on the variant; falls back to ``body``.
     Plain-text bodies are converted to basic HTML by replacing newlines
-    with ``<br>`` tags. Always includes greeting and signature.
+    with ``<br>`` tags. Always includes greeting and signature. Strips any
+    greeting already written into the body to prevent doubling.
     """
     raw = variant.get("html_body") or variant.get("body", "")
     content = _apply_tokens(raw, prospect)
-    greeting = f"<p>Hi {prospect.get('name', 'there')},</p>"
-    # If there are no HTML tags, wrap as simple paragraph HTML
+    name = prospect.get("name") or "there"
+    greeting = f"<p>Hi {name},</p>"
+    # If there are no HTML tags, convert plain text → HTML, stripping inline greeting
     if "<" not in content:
+        content = _strip_leading_greeting(content)
         lines = content.replace("\r\n", "\n").split("\n")
-        content = "<br>".join(lines)
-        content = f"<p>{content}</p>"
-    signature = f"<br><br><p>Best regards,<br>{getattr(settings, 'EMAIL_SIGNATURE', 'The Team')}</p>"
-    return f"{greeting}{content}{signature}"
+        paragraphs = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped:
+                paragraphs.append(f"<p>{stripped}</p>")
+        content = "\n".join(paragraphs) if paragraphs else "<p></p>"
+    else:
+        content = _strip_leading_greeting_html(content)
+    signature = (
+        f"<br>"
+        f"<p style='color:#555;font-size:14px;'>"
+        f"Best regards,<br><strong>{_get_signature()}</strong>"
+        f"</p>"
+    )
+    return f"{greeting}\n{content}\n{signature}"
 
 
 # ---------------------------------------------------------------------------

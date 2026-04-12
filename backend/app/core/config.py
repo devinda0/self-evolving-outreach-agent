@@ -1,5 +1,3 @@
-# Email signature for all outbound emails
-EMAIL_SIGNATURE = "Signal to Action Team"
 """Application settings loaded from environment variables."""
 
 from pydantic_settings import BaseSettings
@@ -42,6 +40,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     LLM_MODEL: str = "gpt-4o"
     LLM_BASE_URL: str = ""  # leave empty to use the default OpenAI endpoint
+
+    # Outbound email signature (shown at the bottom of every sent email)
+    EMAIL_SIGNATURE: str = "Signal to Action Team"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

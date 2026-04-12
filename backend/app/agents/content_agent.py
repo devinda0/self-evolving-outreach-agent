@@ -173,8 +173,13 @@ For EACH variant:
 6. Every sentence must earn its place. If it doesn't add value, cut it.
 
 Rules:
-- Do NOT use generic template tokens like {{{{first_name}}}} or {{{{company}}}}.
-  Write the actual prospect's name and company directly into the content.
+- PERSONALISATION TOKENS: If the prospect Name is shown as {{{{first_name}}}} and Company
+  as {{{{company}}}}, this is a multi-recipient campaign. You MUST write {{{{first_name}}}}
+  and {{{{company}}}} verbatim in your content — they will be swapped for each recipient's
+  real details at send time. Otherwise (actual name provided), write the name directly.
+- Do NOT start the body with a greeting like "Hi {{{{first_name}}}}", "Hello", or "Dear".
+  A greeting is added automatically by the system — begin the body with the first content
+  sentence.
 - subject_line is required for email, null for linkedin.
 - source_finding_ids must reference IDs from the findings above.
 - hypothesis format: "Leading with [angle] will increase [metric] for [prospect_name] at [company]"
@@ -301,6 +306,19 @@ def _format_prospects_for_prompt(prospects: list[dict], max_prospects: int = 5) 
     if not prospects:
         return "(no prospects available — use generic {{first_name}} and {{company}} tokens)"
 
+    # Detect multi-recipient (generalized) mode
+    if len(prospects) == 1 and prospects[0].get("id") == "generalized":
+        return (
+            "MULTI-RECIPIENT CAMPAIGN — content will be sent to multiple different prospects.\n"
+            "  Name: {{first_name}}  ← write this token verbatim in your content\n"
+            "  Company: {{company}}  ← write this token verbatim in your content\n"
+            "Do NOT reference a specific title, role, or company. Keep the message broadly\n"
+            "relevant. Use {{first_name}} and {{company}} wherever you'd normally write a\n"
+            "person's name or company name.\n"
+            "Recommended channel: email\n"
+            "Recommended angle: value-proposition"
+        )
+
     lines = []
     for p in prospects[:max_prospects]:
         p_fields = p.get("personalization_fields", {})
@@ -346,21 +364,37 @@ def _extract_last_user_message(messages: list[Any]) -> str:
     return ""
 
 
+_GENERALIZED_PROSPECT = {
+    "id": "generalized",
+    "name": "{{first_name}}",
+    "company": "{{company}}",
+    "title": "",  # no specific title — keep content role-agnostic
+    "email": "",
+    "fit_score": 0.5,
+    "urgency_score": 0.5,
+    "angle_recommendation": "value-proposition",
+    "channel_recommendation": "email",
+}
+
+
 def _get_selected_prospects(state: CampaignState) -> list[dict]:
-    """Get the target prospects for personalized content generation."""
+    """Get the target prospects for content generation.
+
+    Single prospect → return it directly for fully personalized content.
+    Multiple prospects → return a generalized placeholder (with {{first_name}} /
+    {{company}} tokens) so the LLM writes one campaign-wide template that the
+    deployment layer personalizes per recipient.
+    """
     all_prospects = state.get("prospect_cards", [])
     selected_ids = set(state.get("selected_prospect_ids", []))
 
     if selected_ids:
         selected = [p for p in all_prospects if p.get("id") in selected_ids]
         if selected:
-            # If only one prospect, return for full personalization
             if len(selected) == 1:
                 return selected
-            # If multiple, return a single dummy prospect for generalized content
-            else:
-                # Use a dummy prospect with name 'there' and no company for generalization
-                return [{"id": "generalized", "name": "there", "company": "", "title": "", "email": "", "fit_score": 0.5, "urgency_score": 0.5, "angle_recommendation": "value-proposition", "channel_recommendation": "email"}]
+            # Multiple selected → generalized template content
+            return [_GENERALIZED_PROSPECT]
 
     if all_prospects:
         sorted_prospects = sorted(
@@ -368,8 +402,8 @@ def _get_selected_prospects(state: CampaignState) -> list[dict]:
         )
         if len(sorted_prospects) == 1:
             return sorted_prospects[:1]
-        else:
-            return [{"id": "generalized", "name": "there", "company": "", "title": "", "email": "", "fit_score": 0.5, "urgency_score": 0.5, "angle_recommendation": "value-proposition", "channel_recommendation": "email"}]
+        # Multiple available → generalized template content
+        return [_GENERALIZED_PROSPECT]
 
     return []
 
