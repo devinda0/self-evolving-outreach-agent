@@ -690,7 +690,6 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         "winning_variant_id": winner["variant_id"] if winner else None,
         "ab_significance": significance,
         "prior_cycle_summary": learning_delta,
-        "cycle_number": cycle_number + 1,
         "next_node": "orchestrator",
         "pending_ui_frames": [response_frame, ab_frame, summary_frame],
     }

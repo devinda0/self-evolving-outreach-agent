@@ -77,3 +77,55 @@ class IntelligenceEntry(BaseModel):
     confidence_updates: list[dict]
     winning_variant_id: Optional[str] = None
     created_at: datetime
+
+
+class ApproachOutcome(BaseModel):
+    """Tracks whether a specific outreach approach worked or failed."""
+
+    approach: str  # e.g. "ROI-focused email with casual tone"
+    channel: str
+    variant_id: Optional[str] = None
+    engagement_rate: float = 0.0  # reply_rate or best available metric
+    sample_size: int = 0
+    verdict: Literal["effective", "ineffective", "insufficient_data"]
+
+
+class CycleRecord(BaseModel):
+    """Persistent snapshot of a completed campaign cycle.
+
+    Captures all key outcomes so that future cycles can learn from past
+    approaches without re-reading raw data.
+    """
+
+    id: str
+    session_id: str
+    cycle_number: int
+
+    # What was attempted
+    research_summary: str = ""
+    segments_used: list[str] = Field(default_factory=list)
+    content_strategies: list[str] = Field(default_factory=list)
+    channels_used: list[str] = Field(default_factory=list)
+    prospects_contacted: int = 0
+
+    # What happened
+    total_sends: int = 0
+    total_opens: int = 0
+    total_replies: int = 0
+    total_bounces: int = 0
+    winning_variant_id: Optional[str] = None
+    winning_strategy: Optional[str] = None
+
+    # Approach-level outcomes for self-evolution
+    approach_outcomes: list[ApproachOutcome] = Field(default_factory=list)
+
+    # Accumulated learnings
+    learning_delta: str = ""
+    approaches_to_avoid: list[str] = Field(default_factory=list)
+    approaches_to_amplify: list[str] = Field(default_factory=list)
+
+    # Interaction tracking
+    interaction_count: int = 0
+    key_decisions: list[str] = Field(default_factory=list)
+
+    completed_at: datetime

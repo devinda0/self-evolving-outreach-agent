@@ -13,6 +13,7 @@ from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
 from app.agents.content_agent import content_agent_node
+from app.agents.cycle_manager import refined_cycle_node
 from app.agents.deployment_agent import deployment_agent_node
 from app.agents.feedback_agent import feedback_agent_node
 from app.agents.mcp_config_agent import mcp_config_node
@@ -61,6 +62,7 @@ def route_from_orchestrator(state: CampaignState) -> str:
         "generate",
         "deploy",
         "feedback",
+        "refined_cycle",
         "clarify",
         "answer",
         "update_context",
@@ -128,6 +130,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_node("content_agent", content_agent_node)
     builder.add_node("deployment_agent", deployment_agent_node)
     builder.add_node("feedback_agent", feedback_agent_node)
+    builder.add_node("refined_cycle", refined_cycle_node)
     builder.add_node("clarify", clarify_node)
     builder.add_node("answer", answer_node)
     builder.add_node("update_context", update_context_node)
@@ -150,6 +153,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
             "generate": "content_agent",
             "deploy": "deployment_agent",
             "feedback": "feedback_agent",
+            "refined_cycle": "refined_cycle",
             "clarify": "clarify",
             "answer": "answer",
             "update_context": "update_context",
@@ -171,6 +175,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_edge("content_agent", END)
     builder.add_edge("deployment_agent", END)
     builder.add_edge("feedback_agent", END)
+    builder.add_edge("refined_cycle", END)
     builder.add_edge("clarify", END)
     builder.add_edge("answer", END)
     builder.add_edge("update_context", END)

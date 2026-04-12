@@ -597,8 +597,8 @@ class TestFeedbackAgentNode:
         # var-A should win (has replies, var-B doesn't)
         assert result.get("winning_variant_id") == "var-A"
 
-        # Cycle advanced
-        assert result["cycle_number"] == 2
+        # Cycle is NOT advanced by feedback agent — that's now the refined_cycle node's job
+        assert "cycle_number" not in result
         assert result["next_node"] == "orchestrator"
 
         # IntelligenceEntry was saved

@@ -148,6 +148,16 @@ class MemoryManager:
             "relevant_cycle_summary": state.get("prior_cycle_summary"),
         }
 
+        # Include accumulated learnings for all agents so they can evolve
+        accumulated = state.get("accumulated_learnings")
+        if accumulated:
+            base["accumulated_learnings"] = accumulated
+
+        # Include compact cycle history for context-aware agents
+        cycle_records = state.get("cycle_records", [])
+        if cycle_records:
+            base["cycle_history"] = self._get_compact_cycle_history(cycle_records)
+
         # Agent-specific additions
         if agent_type == "orchestrator":
             base["intent_history"] = state.get("intent_history", [])[-5:]
@@ -321,6 +331,27 @@ class MemoryManager:
         """
         messages = state.get("messages", [])
         return messages[-n:]
+
+    # ------------------------------------------------------------------
+    # Private helpers — cycle history
+    # ------------------------------------------------------------------
+
+    def _get_compact_cycle_history(self, cycle_records: list[dict]) -> list[dict]:
+        """Return a compact representation of cycle history for context bundles.
+
+        Only includes the most actionable fields to stay within token budget.
+        """
+        compact = []
+        for rec in cycle_records[-5:]:  # last 5 cycles max
+            compact.append({
+                "cycle": rec.get("cycle_number"),
+                "sends": rec.get("total_sends", 0),
+                "replies": rec.get("total_replies", 0),
+                "winning_strategy": rec.get("winning_strategy"),
+                "amplify": rec.get("approaches_to_amplify", [])[:3],
+                "avoid": rec.get("approaches_to_avoid", [])[:3],
+            })
+        return compact
 
     # ------------------------------------------------------------------
     # Private helpers — findings

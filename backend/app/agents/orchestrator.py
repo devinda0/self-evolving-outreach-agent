@@ -52,7 +52,7 @@ INTENT_TO_NODE = {
     "generate": "generate",
     "deploy": "deploy",
     "feedback": "feedback",
-    "refined_cycle": "orchestrator",  # re-entry for new cycle
+    "refined_cycle": "refined_cycle",
     "clarify": "clarify",
     "answer": "answer",
     "update_context": "update_context",
@@ -70,11 +70,21 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - generate: user wants content created (outreach, social posts, briefs)
 - deploy: user wants to send content to a channel
 - feedback: user is reporting engagement results or a webhook event has arrived
-- refined_cycle: user wants to restart the loop using accumulated intelligence
+- refined_cycle: user wants to proceed to the next cycle, start a new iteration, restart the loop, or reference moving forward. This captures the current cycle's learnings and advances to the next cycle. Key phrases: "next cycle", "proceed to cycle N", "start over", "iterate", "new cycle", "run another cycle", "let's do cycle N"
 - mcp_configure: user wants to configure, add, remove, list, or manage MCP servers/tools — this includes providing MCP URLs, asking to connect external services via MCP, or managing tool integrations
 - answer: user is asking a question about the campaign, product, system status, strategy, or any topic that can be answered from existing context — NOT requesting new research or content generation
 - update_context: user is providing clarifications, corrections, or additional information about their product, company, target market, goals, or preferences — NOT requesting an action
 - clarify: message is genuinely ambiguous and you cannot determine ANY of the above intents — generate a specific clarification question
+
+## Cycle Awareness
+You are currently in Cycle {cycle_number}. The system maintains persistent memory of all past cycles.
+{cycle_context}
+
+When the user mentions cycles:
+- "proceed to cycle 2", "next cycle", "start cycle 3", "iterate", "run another round" → refined_cycle
+- "what happened in cycle 1?" → answer (use cycle history to respond)
+- "what worked last cycle?" → answer (use cycle learnings)
+- "try a different approach this time" → this could be refined_cycle if starting new, or generate if mid-cycle
 
 ## Rules
 - Read intent from full conversation context, not just latest message
@@ -84,6 +94,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - "who are we sending to?" or "show selected prospects" → "prospect_manage"
 - "configure MCP server" or "add mcp" or "connect brightdata" or any MCP/tool server URL → "mcp_configure"
 - "list mcp servers" or "show connected tools" or "remove mcp server" → "mcp_configure"
+- "proceed to next cycle" or "let's do cycle 2" or "start over with learnings" or "iterate" or "next round" → "refined_cycle"
 - If user asks a direct question (e.g. "what is our target market?", "how many variants did we create?", "what should I focus on?") → "answer"
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
@@ -92,14 +103,14 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - Do not generate any content. Only classify and route.
 
 ## Output format (strict JSON, no prose, no markdown code blocks)
-{
+{{
   "current_intent": "<one of: research, segment, prospect_manage, generate, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
   "reasoning": "<one sentence explaining your classification>",
   "user_directive": "<a clear, actionable summary of WHAT the user wants the next agent to do — capture specific focus areas, constraints, preferences, and tone from the user's message. Examples: 'Research competitor pricing strategies for enterprise SaaS', 'Generate 3 email variants with a casual, friendly tone focused on cost savings', 'Deploy only the ROI-focused variant to top 3 prospects'. This MUST reflect the user's specific request, not a generic description of what the agent does.>",
   "clarification_question": "<only if current_intent=clarify, else null>",
   "clarification_options": ["<option1>", "<option2>", "..."],
-  "next_node": "<research, segment, generate, deploy, feedback, answer, update_context, clarify>"
-}"""
+  "next_node": "<research, segment, generate, deploy, feedback, refined_cycle, answer, update_context, clarify>"
+}}"""
 
 DEFAULT_CLARIFICATION = (
     "I didn't quite catch that — could you clarify what you'd like to do? "
@@ -220,6 +231,44 @@ def _validate_and_normalize_result(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _build_cycle_context_for_prompt(state: CampaignState) -> str:
+    """Build a compact cycle history context string for the orchestrator prompt."""
+    cycle_records = state.get("cycle_records", [])
+    accumulated = state.get("accumulated_learnings")
+    cycle_number = state.get("cycle_number", 1)
+
+    if not cycle_records and not accumulated:
+        if cycle_number <= 1:
+            return "This is the first cycle. No prior cycle history."
+        return f"Currently in cycle {cycle_number}. No detailed cycle records available."
+
+    lines: list[str] = [f"Currently in Cycle {cycle_number}."]
+
+    if cycle_records:
+        lines.append(f"Completed cycles: {len(cycle_records)}")
+        for rec in cycle_records[-3:]:  # last 3 cycles for context
+            cn = rec.get("cycle_number", "?")
+            sends = rec.get("total_sends", 0)
+            replies = rec.get("total_replies", 0)
+            amplify = rec.get("approaches_to_amplify", [])
+            avoid = rec.get("approaches_to_avoid", [])
+            lines.append(
+                f"  Cycle {cn}: {sends} sends, {replies} replies"
+                + (f", amplify: {', '.join(amplify[:2])}" if amplify else "")
+                + (f", avoid: {', '.join(avoid[:2])}" if avoid else "")
+            )
+
+    if accumulated:
+        # Include only the directives section to keep prompt compact
+        directives_start = accumulated.find("=== DIRECTIVES FOR NEXT CYCLE ===")
+        if directives_start >= 0:
+            lines.append(accumulated[directives_start:directives_start + 500])
+        else:
+            lines.append(accumulated[:300])
+
+    return "\n".join(lines)
+
+
 async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
     """Classify user intent and route to the appropriate agent.
 
@@ -256,13 +305,26 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
     # Build the prompt
     task = bundle.get("task_header", {})
     stage = bundle.get("current_stage_state", {})
+
+    # Build cycle context for the system prompt
+    cycle_number = task.get("cycle_number", 1)
+    cycle_context = _build_cycle_context_for_prompt(state)
+
+    # Format the system prompt with cycle awareness
+    formatted_system_prompt = SYSTEM_PROMPT.format(
+        cycle_number=cycle_number,
+        cycle_context=cycle_context,
+    )
+
     prompt = f"""Campaign context:
 - Product: {task.get("product_name", "Unknown")}
 - Description: {state.get("product_description", "No description")}
 - Target Market: {task.get("target_market", "Unknown")}
 - Stage: {stage.get("active_stage_summary", "starting")}
-- Cycle: {task.get("cycle_number", 1)}
+- Cycle: {cycle_number}
 - Prior intent: {stage.get("previous_intent", "none")}
+
+{cycle_context}
 
 Conversation (last {len(context_messages)} turns):
 {format_messages(context_messages)}
@@ -277,7 +339,7 @@ Classify the latest user intent."""
         try:
             response = await llm.ainvoke(
                 [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": formatted_system_prompt},
                     {"role": "user", "content": prompt},
                 ]
             )
@@ -478,6 +540,32 @@ async def answer_node(state: CampaignState) -> dict[str, Any]:
     feedback = state.get("engagement_results", [])
     if feedback:
         context_parts.append(f"\nEngagement Results: {len(feedback)} events")
+
+    # Include cycle history if available
+    cycle_records = state.get("cycle_records", [])
+    if cycle_records:
+        context_parts.append(f"\nCycle History ({len(cycle_records)} completed cycles):")
+        for rec in cycle_records:
+            cn = rec.get("cycle_number", "?")
+            sends = rec.get("total_sends", 0)
+            replies = rec.get("total_replies", 0)
+            amplify = rec.get("approaches_to_amplify", [])
+            avoid = rec.get("approaches_to_avoid", [])
+            context_parts.append(
+                f"  Cycle {cn}: {sends} sends, {replies} replies"
+                + (f" | worked: {', '.join(amplify[:2])}" if amplify else "")
+                + (f" | failed: {', '.join(avoid[:2])}" if avoid else "")
+            )
+
+    # Include accumulated learnings
+    accumulated = state.get("accumulated_learnings")
+    if accumulated:
+        # Extract just the directives section for conciseness
+        directives_start = accumulated.find("=== DIRECTIVES FOR NEXT CYCLE ===")
+        if directives_start >= 0:
+            context_parts.append(f"\nAccumulated Learnings:\n{accumulated[directives_start:directives_start + 500]}")
+        else:
+            context_parts.append(f"\nAccumulated Learnings: {accumulated[:300]}")
 
     context_str = "\n".join(context_parts)
 

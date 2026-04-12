@@ -32,6 +32,8 @@ class CampaignState(TypedDict):
     cycle_number: int
     prior_cycle_summary: Optional[str]
     active_stage_summary: Optional[str]
+    cycle_records: list[dict]  # Persistent snapshots of completed cycles
+    accumulated_learnings: Optional[str]  # Evolved knowledge from all past cycles
 
     # Research stage
     research_query: Optional[str]

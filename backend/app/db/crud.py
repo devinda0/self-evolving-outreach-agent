@@ -9,6 +9,7 @@ from app.db.client import get_db
 from app.db.collections import (
     CAMPAIGN_SESSIONS,
     CONTENT_VARIANTS,
+    CYCLE_RECORDS,
     DEAD_LETTER_QUEUE,
     DEPLOYMENT_RECORDS,
     FEEDBACK_EVENTS,
@@ -407,6 +408,52 @@ async def create_indexes() -> None:
     )
     await db[QUARANTINE].create_index([("session_id", ASCENDING), ("received_at", ASCENDING)])
     await db[MCP_SERVERS].create_index("server_id", unique=True)
+    await db[CYCLE_RECORDS].create_index(
+        [("session_id", ASCENDING), ("cycle_number", ASCENDING)], unique=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cycle records
+# ---------------------------------------------------------------------------
+
+
+async def save_cycle_record(record: dict[str, Any]) -> None:
+    """Insert a cycle snapshot. One record per session+cycle_number."""
+    db = get_db()
+    await db[CYCLE_RECORDS].find_one_and_update(
+        {"session_id": record["session_id"], "cycle_number": record["cycle_number"]},
+        {"$set": record},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+async def get_cycle_records(session_id: str) -> list[dict[str, Any]]:
+    """Return all cycle records for a session, ordered by cycle_number ascending."""
+    db = get_db()
+    cursor = (
+        db[CYCLE_RECORDS]
+        .find({"session_id": session_id})
+        .sort("cycle_number", ASCENDING)
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+async def get_latest_cycle_record(session_id: str) -> dict[str, Any] | None:
+    """Return the most recent cycle record for a session."""
+    db = get_db()
+    doc = await db[CYCLE_RECORDS].find_one(
+        {"session_id": session_id},
+        sort=[("cycle_number", DESCENDING)],
+    )
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
 
 
 # ---------------------------------------------------------------------------
