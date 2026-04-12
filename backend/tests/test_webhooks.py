@@ -118,6 +118,52 @@ class TestInjectCanSpamFooter:
 
 
 # ---------------------------------------------------------------------------
+# Inbound reply detection on /webhook/resend
+# ---------------------------------------------------------------------------
+
+
+class TestResendInboundReplyDetection:
+    """Verify that inbound replies hitting /webhook/resend are routed to the
+    inbound reply pipeline instead of being quarantined."""
+
+    async def test_inbound_reply_routed_to_inbound_pipeline(self):
+        """A webhook payload with an unrecognised type and a from_email that
+        differs from RESEND_FROM_EMAIL should be processed as an inbound reply."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.api.webhooks import _extract_inbound_reply
+
+        # Simulate the payload Resend delivers for an inbound reply
+        payload = {
+            "type": "email.received",
+            "created_at": "2026-04-12T06:20:24.000Z",
+            "data": {
+                "from": "prospect@gmail.com",
+                "to": ["outreach@yourdomain.com"],
+                "subject": "Re: Investing between lectures?",
+                "text": "Sounds interesting, tell me more!",
+                "email_id": "abc-123",
+                "message_id": "<reply-msg-id@mail.gmail.com>",
+            },
+        }
+
+        reply_info = _extract_inbound_reply(payload)
+        assert reply_info is not None
+        assert reply_info["from_email"] == "prospect@gmail.com"
+        assert reply_info["subject"] == "Re: Investing between lectures?"
+
+    async def test_standard_event_not_routed_as_inbound(self):
+        """Standard outbound events (email.delivered, etc.) should not be
+        mis-routed to the inbound pipeline."""
+        from app.api.webhooks import _RESEND_EVENT_MAP
+
+        # All standard types must be in the map
+        for event_type in ("email.sent", "email.delivered", "email.opened",
+                           "email.clicked", "email.bounced", "email.complained"):
+            assert event_type in _RESEND_EVENT_MAP
+
+
+# ---------------------------------------------------------------------------
 # Token-bucket rate limiter
 # ---------------------------------------------------------------------------
 

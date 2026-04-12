@@ -163,9 +163,26 @@ async def webhook_resend(request: Request) -> dict[str, str]:
     payload: dict[str, Any] = _json.loads(raw_body)
 
     data = payload.get("data", {})
+    raw_type = payload.get("type", "unknown")
+
+    # --- Detect inbound reply arriving on the standard webhook endpoint ---
+    # Resend inbound emails may be delivered here instead of /webhook/resend/inbound.
+    # If the event type is unrecognised AND the payload looks like an inbound email
+    # (sender is not our outreach address), route through the inbound reply pipeline.
+    if raw_type not in _RESEND_EVENT_MAP:
+        reply_info = _extract_inbound_reply(payload)
+        if reply_info and reply_info["from_email"] != settings.RESEND_FROM_EMAIL.lower():
+            logger.info(
+                "webhook_resend: detected inbound reply (type=%s, from=%s) — "
+                "routing to inbound pipeline",
+                raw_type,
+                reply_info["from_email"],
+            )
+            await _ingest_inbound_reply(reply_info, payload)
+            return {"status": "accepted"}
+
     provider_message_id = data.get("message_id") or payload.get("provider_message_id")
     provider_event_id = data.get("email_id") or payload.get("provider_event_id", "")
-    raw_type = payload.get("type", "unknown")
     event_type = _map_resend_event_type(raw_type)
 
     dedupe_key = f"resend:{provider_event_id or uuid4()}"
