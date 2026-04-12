@@ -1,3 +1,5 @@
+# Email signature for all outbound emails
+EMAIL_SIGNATURE = "Signal to Action Team"
 """Application settings loaded from environment variables."""
 
 from pydantic_settings import BaseSettings

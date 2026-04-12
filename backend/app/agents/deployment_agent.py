@@ -72,25 +72,30 @@ def _apply_tokens(text: str, prospect: dict) -> str:
 
 
 def personalize_variant(variant: dict, prospect: dict) -> str:
-    """Replace {{first_name}} and {{company}} tokens in the variant body (plain text)."""
-    return _apply_tokens(variant.get("body", ""), prospect)
+    """Return a plain text email body with greeting and signature."""
+    body = _apply_tokens(variant.get("body", ""), prospect)
+    greeting = f"Hi {prospect.get('name', 'there')},\n\n"
+    signature = f"\n\nBest regards,\n{settings.EMAIL_SIGNATURE if hasattr(settings, 'EMAIL_SIGNATURE') and settings.EMAIL_SIGNATURE else 'The Team'}"
+    return f"{greeting}{body}{signature}"
 
 
 def personalize_variant_html(variant: dict, prospect: dict) -> str:
-    """Return a personalised HTML body for email sending.
+    """Return a personalised HTML body for email sending, with greeting and signature.
 
     Uses ``html_body`` if present on the variant; falls back to ``body``.
     Plain-text bodies are converted to basic HTML by replacing newlines
-    with ``<br>`` tags.
+    with ``<br>`` tags. Always includes greeting and signature.
     """
     raw = variant.get("html_body") or variant.get("body", "")
     content = _apply_tokens(raw, prospect)
+    greeting = f"<p>Hi {prospect.get('name', 'there')},</p>"
     # If there are no HTML tags, wrap as simple paragraph HTML
     if "<" not in content:
         lines = content.replace("\r\n", "\n").split("\n")
         content = "<br>".join(lines)
         content = f"<p>{content}</p>"
-    return content
+    signature = f"<br><br><p>Best regards,<br>{getattr(settings, 'EMAIL_SIGNATURE', 'The Team')}</p>"
+    return f"{greeting}{content}{signature}"
 
 
 # ---------------------------------------------------------------------------
@@ -337,10 +342,11 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     all_prospects = state.get("prospect_cards", [])
     selected_prospect_ids = state.get("selected_prospect_ids", [])
     selected_prospects = [p for p in all_prospects if p.get("id") in selected_prospect_ids]
-
     # Fallback: if no explicit selection, use all prospects
     if not selected_prospects:
         selected_prospects = all_prospects
+    # Filter out prospects without email
+    selected_prospects = [p for p in selected_prospects if p.get("email")]
 
     # -- Guard: need at least variants and prospects --
     if not selected_variants:
@@ -433,6 +439,10 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     ab_plan = state.get("ab_split_plan") or build_ab_split_plan(
         selected_variants, selected_prospects
     )
+    # If more than one prospect, use only the first variant and treat as generalized
+    if len(selected_prospects) > 1 and len(selected_variants) > 1:
+        selected_variants = selected_variants[:1]
+        ab_plan = build_ab_split_plan(selected_variants, selected_prospects)
     segment_id = state.get("selected_segment_id") or "seg-unknown"
 
     deployment_records: list[dict] = []

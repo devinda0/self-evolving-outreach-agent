@@ -354,13 +354,22 @@ def _get_selected_prospects(state: CampaignState) -> list[dict]:
     if selected_ids:
         selected = [p for p in all_prospects if p.get("id") in selected_ids]
         if selected:
-            return selected
+            # If only one prospect, return for full personalization
+            if len(selected) == 1:
+                return selected
+            # If multiple, return a single dummy prospect for generalized content
+            else:
+                # Use a dummy prospect with name 'there' and no company for generalization
+                return [{"id": "generalized", "name": "there", "company": "", "title": "", "email": "", "fit_score": 0.5, "urgency_score": 0.5, "angle_recommendation": "value-proposition", "channel_recommendation": "email"}]
 
     if all_prospects:
         sorted_prospects = sorted(
             all_prospects, key=lambda p: p.get("fit_score", 0.0), reverse=True
         )
-        return sorted_prospects[:5]
+        if len(sorted_prospects) == 1:
+            return sorted_prospects[:1]
+        else:
+            return [{"id": "generalized", "name": "there", "company": "", "title": "", "email": "", "fit_score": 0.5, "urgency_score": 0.5, "angle_recommendation": "value-proposition", "channel_recommendation": "email"}]
 
     return []
 
