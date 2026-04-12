@@ -19,10 +19,10 @@ from uuid import uuid4
 import httpx
 
 from app.core.config import settings
-from app.db.crud import save_deployment_record
+from app.db.crud import save_deployment_record, upsert_email_thread
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
-from app.models.intelligence import DeploymentRecord
+from app.models.intelligence import DeploymentRecord, EmailThread, EmailThreadMessage
 from app.models.ui_frames import UIAction, UIFrame
 
 logger = logging.getLogger(__name__)
@@ -477,6 +477,42 @@ async def deployment_agent_node(state: CampaignState) -> dict:
 
         await save_deployment_record(record.model_dump())
         deployment_records.append(record.model_dump(mode="json"))
+
+        # Create email thread for tracking the conversation with this prospect
+        if send_status == "sent" and channel == "email":
+            try:
+                now = datetime.now(timezone.utc)
+                outbound_msg = EmailThreadMessage(
+                    message_id=provider_message_id or record.id,
+                    direction="outbound",
+                    subject=variant.get("subject_line"),
+                    body_text=rendered_content,
+                    body_html=variant.get("body"),
+                    sender_email=settings.RESEND_FROM_EMAIL,
+                    recipient_email=prospect.get("email"),
+                    timestamp=now,
+                )
+                thread = EmailThread(
+                    id=str(uuid4()),
+                    session_id=session_id,
+                    prospect_id=prospect.get("id", ""),
+                    prospect_email=prospect.get("email", ""),
+                    prospect_name=prospect.get("name"),
+                    variant_id=variant.get("id", ""),
+                    deployment_record_id=record.id,
+                    subject=variant.get("subject_line"),
+                    messages=[outbound_msg],
+                    status="sent",
+                    reply_count=0,
+                    last_activity_at=now,
+                    created_at=now,
+                )
+                await upsert_email_thread(thread.model_dump(mode="json"))
+            except Exception as exc:
+                logger.warning(
+                    "deployment_agent_node: failed to create email thread for prospect %s: %s",
+                    prospect.get("id"), exc,
+                )
 
     # -- Emit DeliveryStatusCard --
     status_frame = build_delivery_status_frame(

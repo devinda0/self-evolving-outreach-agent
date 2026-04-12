@@ -695,3 +695,342 @@ class TestFeedbackAgentNode:
         # Should not raise
         result = await feedback_agent_node(state)
         assert "engagement_results" in result  # State should still contain engagement results
+
+
+# ---------------------------------------------------------------------------
+# Tests for event hydration from MongoDB
+# ---------------------------------------------------------------------------
+
+
+class TestHydrateFeedbackFromDB:
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.get_deployment_records_for_session", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.get_feedback_events_for_session", new_callable=AsyncMock)
+    async def test_merges_db_events_with_state(
+        self,
+        mock_get_events: AsyncMock,
+        mock_get_records: AsyncMock,
+    ):
+        """Events in DB but not in state should be merged into the result."""
+        from app.agents.feedback_agent import hydrate_feedback_from_db
+
+        state_events = [_make_event("var-A", "open", dedupe_key="dk-state-1")]
+        db_events = [
+            _make_event("var-A", "open", dedupe_key="dk-state-1"),  # duplicate
+            _make_event("var-A", "click", dedupe_key="dk-db-new"),  # new from DB
+        ]
+        mock_get_events.return_value = db_events
+        mock_get_records.return_value = _make_records(3, "var-A")
+
+        merged, records = await hydrate_feedback_from_db("test-session", state_events)
+
+        assert len(merged) == 2  # 1 from state + 1 new from DB (deduped)
+        assert len(records) == 3
+        dedupe_keys = {e["dedupe_key"] for e in merged}
+        assert "dk-state-1" in dedupe_keys
+        assert "dk-db-new" in dedupe_keys
+
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.get_deployment_records_for_session", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.get_feedback_events_for_session", new_callable=AsyncMock)
+    async def test_no_db_events_returns_state_events(
+        self,
+        mock_get_events: AsyncMock,
+        mock_get_records: AsyncMock,
+    ):
+        """When DB has no new events, result should match state events."""
+        from app.agents.feedback_agent import hydrate_feedback_from_db
+
+        state_events = [
+            _make_event("var-A", "open", dedupe_key="dk-1"),
+            _make_event("var-A", "reply", dedupe_key="dk-2"),
+        ]
+        mock_get_events.return_value = []
+        mock_get_records.return_value = []
+
+        merged, records = await hydrate_feedback_from_db("test-session", state_events)
+
+        assert len(merged) == 2
+        assert len(records) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for enhanced summarize_learning
+# ---------------------------------------------------------------------------
+
+
+class TestSummarizeLearningEnhanced:
+    def test_includes_reply_insights(self):
+        """Reply insights should appear in learning delta text."""
+        results = [
+            {"variant_id": "var-AAAA1234", "sent": 10, "open_rate": 0.5,
+             "click_rate": 0.1, "reply_rate": 0.3, "bounce_rate": 0.0},
+        ]
+        winner = results[0]
+        reply_insights = [
+            {"classification": "interested", "sentiment": "positive",
+             "confidence": 0.9, "key_signals": ["wants demo"], "summary": "Interested"},
+            {"classification": "not_interested", "sentiment": "negative",
+             "confidence": 0.8, "key_signals": ["budget concerns"], "summary": "Declined"},
+        ]
+        text = summarize_learning(results, winner, reply_insights=reply_insights)
+        assert "Reply Analysis" in text
+        assert "interested: 1" in text
+        assert "not_interested: 1" in text
+        assert "wants demo" in text
+
+    def test_includes_thread_summaries(self):
+        """Thread summaries should appear in learning delta text."""
+        results = [
+            {"variant_id": "var-AAAA1234", "sent": 5, "open_rate": 0.5,
+             "click_rate": 0.1, "reply_rate": 0.2, "bounce_rate": 0.0},
+        ]
+        thread_summaries = [
+            {"prospect_name": "Alice", "prospect_email": "alice@co.com",
+             "status": "replied", "reply_count": 2, "classification": "interested"},
+        ]
+        text = summarize_learning(
+            results, results[0], thread_summaries=thread_summaries,
+        )
+        assert "Prospect Conversations" in text
+        assert "Alice" in text
+
+    def test_recommendations_section(self):
+        """Recommendations should reflect reply classifications."""
+        results = [
+            {"variant_id": "var-BBBB5678", "sent": 10, "open_rate": 0.4,
+             "click_rate": 0.1, "reply_rate": 0.2, "bounce_rate": 0.0},
+        ]
+        reply_insights = [
+            {"classification": "interested", "sentiment": "positive",
+             "confidence": 0.9, "key_signals": [], "extracted_info": {}},
+            {"classification": "not_interested", "sentiment": "negative",
+             "confidence": 0.8, "key_signals": [],
+             "extracted_info": {"objection": "Too expensive"}},
+        ]
+        text = summarize_learning(results, results[0], reply_insights=reply_insights)
+        assert "Recommendations for Next Cycle" in text
+        assert "interest" in text.lower()
+        assert "Too expensive" in text
+
+
+# ---------------------------------------------------------------------------
+# Tests for feedback_agent_node with hydration and classification
+# ---------------------------------------------------------------------------
+
+
+class TestFeedbackAgentNodeEnhanced:
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.save_quarantine_event", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.update_finding_confidence", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.save_intelligence_entry", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.get_email_threads_for_session", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.hydrate_feedback_from_db", new_callable=AsyncMock)
+    async def test_hydration_merges_webhook_events(
+        self,
+        mock_hydrate: AsyncMock,
+        mock_get_threads: AsyncMock,
+        mock_save_intel: AsyncMock,
+        mock_update_conf: AsyncMock,
+        mock_quarantine: AsyncMock,
+    ):
+        """The node should use hydrated events (state + DB) for analysis."""
+        state_events = [_make_event("var-A", "open", dedupe_key="dk-1")]
+        records = _make_records(5, "var-A")
+
+        # Simulate hydration returning extra events from DB
+        hydrated_events = state_events + [
+            _make_event("var-A", "reply", dedupe_key="dk-2"),
+            _make_event("var-A", "click", dedupe_key="dk-3"),
+        ]
+        mock_hydrate.return_value = (hydrated_events, records)
+        mock_get_threads.return_value = []
+
+        state = _make_state(
+            normalized_feedback_events=state_events,
+            deployment_records=records,
+        )
+        result = await feedback_agent_node(state)
+
+        # Hydrated events should be returned in state
+        returned_events = result.get("normalized_feedback_events", [])
+        assert len(returned_events) == 3  # 1 state + 2 from DB
+
+        mock_hydrate.assert_called_once_with("test-session", state_events)
+
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.save_quarantine_event", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.update_finding_confidence", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.save_intelligence_entry", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.get_email_threads_for_session", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.hydrate_feedback_from_db", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.update_feedback_event", new_callable=AsyncMock)
+    async def test_reply_events_classified_and_persisted(
+        self,
+        mock_update_event: AsyncMock,
+        mock_hydrate: AsyncMock,
+        mock_get_threads: AsyncMock,
+        mock_save_intel: AsyncMock,
+        mock_update_conf: AsyncMock,
+        mock_quarantine: AsyncMock,
+    ):
+        """Reply events should be classified and classifications persisted to DB."""
+        reply_event = _make_event("var-A", "reply", dedupe_key="dk-reply-1")
+        reply_event["reply_body"] = "Hi, I'm very interested in learning more about your product."
+        records = _make_records(5, "var-A")
+        events = [_make_event("var-A", "open", dedupe_key="dk-open-1"), reply_event]
+
+        mock_hydrate.return_value = (events, records)
+        mock_get_threads.return_value = []
+
+        state = _make_state(
+            normalized_feedback_events=events,
+            deployment_records=records,
+        )
+
+        # Mock the reply classifier to avoid LLM calls
+        mock_classification = {
+            "classification": "interested",
+            "sentiment": "positive",
+            "confidence": 0.95,
+            "key_signals": ["wants to learn more"],
+            "summary": "Prospect expressed interest",
+            "suggested_action": "follow_up",
+            "extracted_info": {},
+        }
+        with patch(
+            "app.agents.reply_classifier.classify_reply_events",
+            new_callable=AsyncMock,
+            return_value=[{**reply_event, "reply_classification": mock_classification}],
+        ):
+            result = await feedback_agent_node(state)
+
+        # Intelligence entry should contain reply insights
+        mock_save_intel.assert_called_once()
+        saved = mock_save_intel.call_args[0][0]
+        assert len(saved.get("reply_insights", [])) > 0
+        assert saved["reply_insights"][0]["classification"] == "interested"
+
+        # Classification should have been persisted to MongoDB
+        mock_update_event.assert_called()
+
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.save_quarantine_event", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.update_finding_confidence", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.save_intelligence_entry", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.get_email_threads_for_session", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.hydrate_feedback_from_db", new_callable=AsyncMock)
+    async def test_thread_summaries_in_learning(
+        self,
+        mock_hydrate: AsyncMock,
+        mock_get_threads: AsyncMock,
+        mock_save_intel: AsyncMock,
+        mock_update_conf: AsyncMock,
+        mock_quarantine: AsyncMock,
+    ):
+        """Email thread summaries should be included in the learning delta."""
+        events = [_make_event("var-A", "open", dedupe_key="dk-1")]
+        records = _make_records(5, "var-A")
+        mock_hydrate.return_value = (events, records)
+        mock_get_threads.return_value = [
+            {
+                "prospect_id": "p-1",
+                "prospect_email": "alice@co.com",
+                "prospect_name": "Alice",
+                "status": "replied",
+                "reply_count": 2,
+                "classification": "interested",
+                "variant_id": "var-A",
+            },
+        ]
+
+        state = _make_state(
+            normalized_feedback_events=events,
+            deployment_records=records,
+        )
+        result = await feedback_agent_node(state)
+
+        mock_save_intel.assert_called_once()
+        saved = mock_save_intel.call_args[0][0]
+        # Learning delta should mention the thread
+        assert "Alice" in saved["learning_delta"]
+
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.save_quarantine_event", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.update_finding_confidence", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.save_intelligence_entry", new_callable=AsyncMock)
+    async def test_hydration_failure_falls_back_to_state(
+        self,
+        mock_save_intel: AsyncMock,
+        mock_update_conf: AsyncMock,
+        mock_quarantine: AsyncMock,
+    ):
+        """If DB hydration fails, the node should fall back to state events."""
+        events = [
+            _make_event("var-A", "open", dedupe_key="dk-1"),
+            _make_event("var-A", "reply", dedupe_key="dk-2"),
+        ]
+        records = _make_records(5, "var-A")
+
+        state = _make_state(
+            normalized_feedback_events=events,
+            deployment_records=records,
+        )
+
+        with patch(
+            "app.agents.feedback_agent.hydrate_feedback_from_db",
+            side_effect=Exception("DB connection refused"),
+        ):
+            result = await feedback_agent_node(state)
+
+        # Should still produce results from state events
+        assert "engagement_results" in result
+        assert len(result["engagement_results"]) > 0
+
+    @pytest.mark.asyncio
+    @patch("app.agents.feedback_agent.save_quarantine_event", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.update_finding_confidence", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.save_intelligence_entry", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.get_email_threads_for_session", new_callable=AsyncMock)
+    @patch("app.agents.feedback_agent.hydrate_feedback_from_db", new_callable=AsyncMock)
+    async def test_response_includes_reply_count(
+        self,
+        mock_hydrate: AsyncMock,
+        mock_get_threads: AsyncMock,
+        mock_save_intel: AsyncMock,
+        mock_update_conf: AsyncMock,
+        mock_quarantine: AsyncMock,
+    ):
+        """Response message should mention the number of replies analyzed."""
+        reply_event = _make_event("var-A", "reply", dedupe_key="dk-reply-1")
+        reply_event["reply_body"] = "Count me in!"
+        events = [reply_event]
+        records = _make_records(5, "var-A")
+
+        mock_hydrate.return_value = (events, records)
+        mock_get_threads.return_value = []
+
+        state = _make_state(
+            normalized_feedback_events=events,
+            deployment_records=records,
+        )
+
+        mock_cls = {
+            "classification": "interested", "sentiment": "positive",
+            "confidence": 0.9, "key_signals": [], "summary": "", "suggested_action": "",
+            "extracted_info": {},
+        }
+        with patch(
+            "app.agents.reply_classifier.classify_reply_events",
+            new_callable=AsyncMock,
+            return_value=[{**reply_event, "reply_classification": mock_cls}],
+        ):
+            result = await feedback_agent_node(state)
+
+        response_frames = [
+            f for f in result["pending_ui_frames"]
+            if f.get("component") == "MessageRenderer"
+        ]
+        assert len(response_frames) >= 1
+        content = response_frames[0]["props"]["content"]
+        assert "1 replies analyzed" in content or "1 repl" in content

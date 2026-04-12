@@ -12,6 +12,7 @@ from app.db.collections import (
     CYCLE_RECORDS,
     DEAD_LETTER_QUEUE,
     DEPLOYMENT_RECORDS,
+    EMAIL_THREADS,
     FEEDBACK_EVENTS,
     INTELLIGENCE_ENTRIES,
     MCP_SERVERS,
@@ -386,6 +387,157 @@ async def get_cached_tool_result(key: str) -> Any | None:
 
 
 # ---------------------------------------------------------------------------
+# Email threads — per-prospect conversation tracking
+# ---------------------------------------------------------------------------
+
+
+async def upsert_email_thread(thread: dict[str, Any]) -> None:
+    """Upsert an email thread by its ID."""
+    db = get_db()
+    await db[EMAIL_THREADS].find_one_and_update(
+        {"id": thread["id"]},
+        {"$set": {**thread, "updated_at": _now()}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+async def get_email_thread_by_prospect(
+    session_id: str,
+    prospect_id: str,
+) -> dict[str, Any] | None:
+    """Find the email thread for a specific prospect in a session."""
+    db = get_db()
+    doc = await db[EMAIL_THREADS].find_one(
+        {"session_id": session_id, "prospect_id": prospect_id}
+    )
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def get_email_thread_by_provider_message_id(
+    provider_message_id: str,
+) -> dict[str, Any] | None:
+    """Find the email thread that contains a message with the given provider_message_id."""
+    db = get_db()
+    doc = await db[EMAIL_THREADS].find_one(
+        {"messages.message_id": provider_message_id}
+    )
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def get_email_threads_for_session(session_id: str) -> list[dict[str, Any]]:
+    """Return all email threads for a session, ordered by last activity."""
+    db = get_db()
+    cursor = (
+        db[EMAIL_THREADS]
+        .find({"session_id": session_id})
+        .sort("last_activity_at", DESCENDING)
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+async def append_thread_message(
+    thread_id: str,
+    message: dict[str, Any],
+    status: str | None = None,
+) -> None:
+    """Append a message to an existing email thread and update status/activity."""
+    db = get_db()
+    update: dict[str, Any] = {
+        "$push": {"messages": message},
+        "$set": {"last_activity_at": _now(), "updated_at": _now()},
+    }
+    if status:
+        update["$set"]["status"] = status
+    if message.get("direction") == "inbound":
+        update["$inc"] = {"reply_count": 1}
+        if message.get("classification"):
+            update["$set"]["classification"] = message["classification"]
+    await db[EMAIL_THREADS].update_one({"id": thread_id}, update)
+
+
+async def get_deployment_record_by_id(record_id: str) -> dict[str, Any] | None:
+    """Look up a deployment record by its internal ID."""
+    db = get_db()
+    doc = await db[DEPLOYMENT_RECORDS].find_one({"id": record_id})
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def find_deployment_by_recipient_email(
+    session_id: str,
+    recipient_email: str,
+) -> dict[str, Any] | None:
+    """Find a deployment record by matching recipient email via prospect lookup.
+
+    This is used when we receive an inbound reply and need to correlate it to a
+    deployment record. We look up prospects in the session by email, then find
+    the deployment record for that prospect.
+    """
+    db = get_db()
+    # First find the prospect by email
+    prospect = await db[PROSPECT_CARDS].find_one(
+        {"session_id": session_id, "email": recipient_email}
+    )
+    if not prospect:
+        # Try case-insensitive match
+        prospect = await db[PROSPECT_CARDS].find_one(
+            {"session_id": session_id, "email": {"$regex": f"^{recipient_email}$", "$options": "i"}}
+        )
+    if not prospect:
+        return None
+
+    prospect_id = prospect.get("id")
+    if not prospect_id:
+        return None
+
+    # Find the most recent deployment record for this prospect
+    doc = await db[DEPLOYMENT_RECORDS].find_one(
+        {"session_id": session_id, "prospect_id": prospect_id},
+        sort=[("sent_at", DESCENDING)],
+    )
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def update_feedback_event(
+    dedupe_key: str,
+    update: dict[str, Any],
+) -> None:
+    """Update a feedback event by dedupe_key (e.g., add reply classification)."""
+    db = get_db()
+    await db[FEEDBACK_EVENTS].update_one(
+        {"dedupe_key": dedupe_key},
+        {"$set": update},
+    )
+
+
+async def get_reply_events_for_session(session_id: str) -> list[dict[str, Any]]:
+    """Return all reply-type feedback events for a session."""
+    db = get_db()
+    cursor = (
+        db[FEEDBACK_EVENTS]
+        .find({"session_id": session_id, "event_type": "reply"})
+        .sort("received_at", ASCENDING)
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(doc)
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Indexes
 # ---------------------------------------------------------------------------
 
@@ -410,6 +562,13 @@ async def create_indexes() -> None:
     await db[MCP_SERVERS].create_index("server_id", unique=True)
     await db[CYCLE_RECORDS].create_index(
         [("session_id", ASCENDING), ("cycle_number", ASCENDING)], unique=True
+    )
+    await db[EMAIL_THREADS].create_index(
+        [("session_id", ASCENDING), ("prospect_id", ASCENDING)], unique=True
+    )
+    await db[EMAIL_THREADS].create_index("messages.message_id")
+    await db[DEPLOYMENT_RECORDS].create_index(
+        [("session_id", ASCENDING), ("prospect_id", ASCENDING)]
     )
 
 

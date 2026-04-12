@@ -65,6 +65,8 @@ class NormalizedFeedbackEvent(BaseModel):
     event_type: Literal["sent", "open", "click", "reply", "bounce", "manual_report"]
     event_value: Optional[float] = None
     qualitative_signal: Optional[str] = None
+    reply_body: Optional[str] = None  # Raw reply content for intelligence extraction
+    reply_classification: Optional[str] = None  # LLM-classified intent
     received_at: datetime
     dedupe_key: str
 
@@ -76,6 +78,44 @@ class IntelligenceEntry(BaseModel):
     learning_delta: str
     confidence_updates: list[dict]
     winning_variant_id: Optional[str] = None
+    reply_insights: list[dict] = Field(default_factory=list)  # Per-reply LLM analysis
+    prospect_sentiment_summary: dict = Field(default_factory=dict)  # prospect_id → summary
+    created_at: datetime
+
+
+class EmailThreadMessage(BaseModel):
+    """A single message in an email thread (sent or received)."""
+
+    message_id: str  # provider_message_id for sent, inbound message ID for replies
+    direction: Literal["outbound", "inbound"]
+    subject: Optional[str] = None
+    body_text: Optional[str] = None  # Plain text body
+    body_html: Optional[str] = None  # HTML body (for outbound)
+    sender_email: Optional[str] = None
+    recipient_email: Optional[str] = None
+    timestamp: datetime
+    # Classification (populated by LLM for inbound messages)
+    classification: Optional[str] = None  # interested, not_interested, question, ooo, bounce, unsubscribe, irrelevant
+    sentiment: Optional[str] = None  # positive, negative, neutral
+    key_signals: list[str] = Field(default_factory=list)  # Extracted intent signals
+
+
+class EmailThread(BaseModel):
+    """Tracks the full email conversation thread per prospect per session."""
+
+    id: str
+    session_id: str
+    prospect_id: str
+    prospect_email: str
+    prospect_name: Optional[str] = None
+    variant_id: Optional[str] = None
+    deployment_record_id: Optional[str] = None
+    subject: Optional[str] = None
+    messages: list[EmailThreadMessage] = Field(default_factory=list)
+    status: Literal["sent", "delivered", "opened", "replied", "bounced"] = "sent"
+    reply_count: int = 0
+    last_activity_at: datetime
+    classification: Optional[str] = None  # Latest reply classification
     created_at: datetime
 
 

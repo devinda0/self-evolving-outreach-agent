@@ -1,7 +1,10 @@
 """Feedback Agent — engagement event aggregation, confidence updates, and learning delta.
 
 Handles:
+- Hydrating feedback events from MongoDB (capturing webhook-delivered events)
 - Aggregating normalized engagement events by variant/segment/channel
+- LLM-powered reply classification (intent, sentiment, actionable signals)
+- Per-prospect email thread analysis and summary
 - Determining the winning variant (minimum sample size guard)
 - Statistical significance testing (chi-squared) for A/B variant comparison
 - Automatic winner declaration when significance threshold is met
@@ -18,8 +21,13 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.db.crud import (
+    get_deployment_records_for_session,
+    get_email_threads_for_session,
+    get_feedback_events_for_session,
+    get_reply_events_for_session,
     save_intelligence_entry,
     save_quarantine_event,
+    update_feedback_event,
     update_finding_confidence,
 )
 from app.memory.manager import memory_manager
@@ -31,6 +39,54 @@ logger = logging.getLogger(__name__)
 
 # Minimum number of events per variant required before a winner is declared.
 MIN_SAMPLE_SIZE = 3
+
+
+# ---------------------------------------------------------------------------
+# Event hydration from MongoDB
+# ---------------------------------------------------------------------------
+
+
+async def hydrate_feedback_from_db(
+    session_id: str,
+    state_events: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Merge feedback events from state with events stored in MongoDB by webhooks.
+
+    Webhooks write directly to MongoDB, bypassing LangGraph state. This function
+    ensures the feedback agent sees ALL events — both those already in state and
+    those delivered via webhooks since the last graph run.
+
+    Returns:
+        (all_events, db_records) — deduplicated merged events and deployment records.
+    """
+    db_events = await get_feedback_events_for_session(session_id)
+    db_records = await get_deployment_records_for_session(session_id)
+
+    # Build dedupe set from state events
+    seen_keys: set[str] = set()
+    for event in state_events:
+        key = event.get("dedupe_key") or f"{event.get('provider_message_id')}:{event.get('event_type')}"
+        seen_keys.add(key)
+
+    # Merge DB events not already in state
+    merged = list(state_events)
+    new_from_db = 0
+    for event in db_events:
+        key = event.get("dedupe_key") or f"{event.get('provider_message_id')}:{event.get('event_type')}"
+        if key not in seen_keys:
+            merged.append(event)
+            seen_keys.add(key)
+            new_from_db += 1
+
+    if new_from_db > 0:
+        logger.info(
+            "hydrate_feedback_from_db: merged %d new events from DB (total=%d) | session=%s",
+            new_from_db,
+            len(merged),
+            session_id,
+        )
+
+    return merged, db_records
 
 
 # ---------------------------------------------------------------------------
@@ -344,39 +400,115 @@ def summarize_learning(
     results: list[dict],
     winner: dict | None,
     significance: dict | None = None,
+    reply_insights: list[dict] | None = None,
+    thread_summaries: list[dict] | None = None,
 ) -> str:
-    """Produce a compact human-readable learning_delta text."""
+    """Produce a comprehensive human-readable learning_delta text."""
     if not results:
         return "No engagement data collected this cycle."
 
     lines: list[str] = []
+
+    # --- Engagement metrics ---
+    lines.append("## Engagement Summary")
     for r in results:
         lines.append(
-            f"Variant {r['variant_id']}: sent={r['sent']}, "
-            f"open_rate={r['open_rate']:.1%}, reply_rate={r['reply_rate']:.1%}"
+            f"- Variant {r['variant_id'][:8]}: sent={r.get('sent', 0)}, "
+            f"open_rate={r.get('open_rate', 0):.1%}, click_rate={r.get('click_rate', 0):.1%}, "
+            f"reply_rate={r.get('reply_rate', 0):.1%}, bounce_rate={r.get('bounce_rate', 0):.1%}"
         )
 
-    summary = "Engagement summary:\n" + "\n".join(lines)
     if winner:
-        summary += (
-            f"\n\nWinner: variant {winner['variant_id']} with "
-            f"reply_rate={winner['reply_rate']:.1%} (n={winner['sent']})"
+        lines.append(
+            f"\n**Winner: variant {winner['variant_id'][:8]}** with "
+            f"reply_rate={winner.get('reply_rate', 0):.1%} (n={winner.get('sent', 0)})"
         )
     else:
-        summary += "\n\nNo winner declared — insufficient sample size."
+        lines.append("\nNo winner declared — insufficient sample size.")
 
     if significance:
-        summary += f"\n\nStatistical significance: {significance['recommendation']}"
+        lines.append(f"\n## Statistical Significance\n{significance['recommendation']}")
         if significance.get("comparisons"):
             for comp in significance["comparisons"]:
                 sig_label = "SIGNIFICANT" if comp["significant"] else "not significant"
-                summary += (
-                    f"\n  {comp['variant_a']} vs {comp['variant_b']}: "
+                lines.append(
+                    f"- {comp['variant_a'][:8]} vs {comp['variant_b'][:8]}: "
                     f"chi²={comp['chi_squared']:.3f} ({sig_label}), "
                     f"effect_size={comp['effect_size']:.1%}"
                 )
 
-    return summary
+    # --- Reply Intelligence ---
+    if reply_insights:
+        lines.append("\n## Reply Analysis")
+        classification_counts: dict[str, int] = defaultdict(int)
+        sentiment_counts: dict[str, int] = defaultdict(int)
+        key_signals_all: list[str] = []
+
+        for insight in reply_insights:
+            cls = insight.get("classification", "unknown")
+            sent = insight.get("sentiment", "unknown")
+            classification_counts[cls] += 1
+            sentiment_counts[sent] += 1
+            key_signals_all.extend(insight.get("key_signals", []))
+
+        lines.append(f"Total replies analyzed: {len(reply_insights)}")
+        lines.append("Classification breakdown:")
+        for cls, count in sorted(classification_counts.items(), key=lambda x: -x[1]):
+            lines.append(f"  - {cls}: {count}")
+        lines.append("Sentiment breakdown:")
+        for sent, count in sorted(sentiment_counts.items(), key=lambda x: -x[1]):
+            lines.append(f"  - {sent}: {count}")
+
+        if key_signals_all:
+            # Deduplicate and show top signals
+            unique_signals = list(dict.fromkeys(key_signals_all))[:10]
+            lines.append("Key signals extracted:")
+            for signal in unique_signals:
+                lines.append(f"  - {signal}")
+
+    # --- Per-prospect thread summaries ---
+    if thread_summaries:
+        replied_threads = [t for t in thread_summaries if t.get("status") == "replied"]
+        if replied_threads:
+            lines.append(f"\n## Prospect Conversations ({len(replied_threads)} active threads)")
+            for t in replied_threads[:5]:  # Show top 5
+                prospect_name = t.get("prospect_name") or t.get("prospect_email", "Unknown")
+                reply_count = t.get("reply_count", 0)
+                classification = t.get("classification") or "pending"
+                lines.append(
+                    f"- {prospect_name}: {reply_count} replies, "
+                    f"latest classification: {classification}"
+                )
+
+    # --- Actionable recommendations ---
+    lines.append("\n## Recommendations for Next Cycle")
+    if reply_insights:
+        interested_count = sum(
+            1 for i in reply_insights if i.get("classification") == "interested"
+        )
+        not_interested_count = sum(
+            1 for i in reply_insights if i.get("classification") == "not_interested"
+        )
+        if interested_count > 0:
+            lines.append(
+                f"- {interested_count} prospect(s) expressed interest — prioritize follow-up"
+            )
+        if not_interested_count > 0:
+            lines.append(
+                f"- {not_interested_count} prospect(s) declined — analyze objections for content refinement"
+            )
+        # Extract common objections
+        objections = [
+            i.get("extracted_info", {}).get("objection")
+            for i in reply_insights
+            if i.get("extracted_info", {}).get("objection")
+        ]
+        if objections:
+            lines.append("- Common objections:")
+            for obj in objections[:3]:
+                lines.append(f"    - {obj}")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -544,29 +676,34 @@ def _emit_feedback_prompt(state: CampaignState) -> dict:
 
 
 async def feedback_agent_node(state: CampaignState) -> dict:
-    """Aggregate engagement events, update confidence, write learning delta.
+    """Aggregate engagement events, classify replies, analyze threads, write learning delta.
 
     Flow:
-    1. If no normalized_feedback_events → emit FeedbackPrompt UI and wait.
-    2. Quarantine events that cannot be correlated to any deployment record.
-    3. Aggregate events by variant into open/click/reply/bounce rates.
-    4. Determine winner (requires MIN_SAMPLE_SIZE sends per variant).
-    5. Compute per-finding confidence deltas and persist to MongoDB.
-    6. Write IntelligenceEntry (learning_delta) to MongoDB.
-    7. Emit ABResults + CycleSummary UI frames.
-    8. Advance cycle_number and route back to orchestrator.
+    1. Hydrate events from MongoDB (captures webhook-delivered events missed in state).
+    2. If no events at all → emit FeedbackPrompt UI and wait.
+    3. Quarantine events that cannot be correlated to any deployment record.
+    4. Aggregate events by variant into open/click/reply/bounce rates.
+    5. Classify reply events using LLM-powered reply classifier.
+    6. Load email threads and build per-prospect conversation summaries.
+    7. Determine winner (requires MIN_SAMPLE_SIZE sends per variant).
+    8. Compute per-finding confidence deltas and persist to MongoDB.
+    9. Write enriched IntelligenceEntry (learning_delta + reply_insights) to MongoDB.
+    10. Emit ABResults + CycleSummary UI frames.
+    11. Advance cycle_number and route back to orchestrator.
     """
+    from app.agents.reply_classifier import classify_reply_events
+
     session_id = state.get("session_id", "")
     cycle_number = state.get("cycle_number", 0)
-    events: list[dict] = state.get("normalized_feedback_events", [])
-    records: list[dict] = state.get("deployment_records", [])
+    state_events: list[dict] = state.get("normalized_feedback_events", [])
+    state_records: list[dict] = state.get("deployment_records", [])
     findings: list[dict] = state.get("research_findings", [])
 
     logger.info(
-        "feedback_agent_node called | session=%s events=%d records=%d findings=%d",
+        "feedback_agent_node called | session=%s state_events=%d records=%d findings=%d",
         session_id,
-        len(events),
-        len(records),
+        len(state_events),
+        len(state_records),
         len(findings),
     )
 
@@ -581,26 +718,108 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     except Exception as exc:
         logger.warning("feedback_agent_node: memory bundle failed (%s) — continuing", exc)
 
+    # -- Step 1: Hydrate events from MongoDB --
+    # Webhooks write directly to DB, bypassing LangGraph state. Merge to get
+    # the full picture of engagement events since deployment.
+    try:
+        events, records = await hydrate_feedback_from_db(session_id, state_events)
+        # Use DB records if state records are empty (common after webhook ingestion)
+        if not records and state_records:
+            records = state_records
+    except Exception as exc:
+        logger.error("feedback_agent_node: hydration failed (%s) — falling back to state", exc)
+        events = state_events
+        records = state_records
+
+    logger.info(
+        "feedback_agent_node: after hydration | events=%d records=%d",
+        len(events),
+        len(records),
+    )
+
     if not events:
         return _emit_feedback_prompt(state)
 
-    # -- Step 1: Quarantine unmatched events (fire-and-forget; do not block on failure) --
+    # -- Step 2: Quarantine unmatched events --
     try:
         await _quarantine_unmatched_events(events, records)
     except Exception as exc:
         logger.error("feedback_agent_node: quarantine step failed: %s", exc)
 
-    # -- Step 2: Aggregate engagement results --
+    # -- Step 3: Aggregate engagement results --
     results = aggregate_engagement_results(events, records)
     logger.info("feedback_agent_node: aggregated %d variant results", len(results))
 
-    # -- Step 3: Determine winner --
+    # -- Step 4: Classify reply events with LLM --
+    reply_insights: list[dict] = []
+    reply_events = [e for e in events if e.get("event_type") == "reply"]
+    if reply_events:
+        try:
+            threads = await get_email_threads_for_session(session_id)
+            prospects = state.get("prospect_cards", [])
+            variants = state.get("content_variants", [])
+
+            classified_replies = await classify_reply_events(
+                events=reply_events,
+                threads=threads,
+                prospects=prospects,
+                variants=variants,
+            )
+
+            # Persist classifications back to MongoDB and collect insights
+            for event in classified_replies:
+                cls_data = event.get("reply_classification", {})
+                if cls_data:
+                    reply_insights.append(cls_data)
+                    dedupe_key = event.get("dedupe_key")
+                    if dedupe_key:
+                        try:
+                            await update_feedback_event(dedupe_key, {
+                                "reply_classification": cls_data.get("classification"),
+                                "reply_body": event.get("reply_body"),
+                            })
+                        except Exception as exc:
+                            logger.warning(
+                                "feedback_agent_node: failed to persist classification for %s: %s",
+                                dedupe_key, exc,
+                            )
+
+            logger.info(
+                "feedback_agent_node: classified %d reply events", len(classified_replies)
+            )
+        except Exception as exc:
+            logger.error("feedback_agent_node: reply classification failed: %s", exc)
+    else:
+        logger.info("feedback_agent_node: no reply events to classify")
+
+    # -- Step 5: Build per-prospect thread summaries --
+    thread_summaries: list[dict] = []
+    try:
+        threads = await get_email_threads_for_session(session_id)
+        for thread in threads:
+            thread_summaries.append({
+                "prospect_id": thread.get("prospect_id"),
+                "prospect_email": thread.get("prospect_email"),
+                "prospect_name": thread.get("prospect_name"),
+                "status": thread.get("status"),
+                "reply_count": thread.get("reply_count", 0),
+                "classification": thread.get("classification"),
+                "variant_id": thread.get("variant_id"),
+            })
+        logger.info(
+            "feedback_agent_node: built %d thread summaries", len(thread_summaries)
+        )
+    except Exception as exc:
+        logger.error("feedback_agent_node: thread summary step failed: %s", exc)
+
+    # -- Step 6: Determine winner --
     winner = determine_winner(results, min_sample_size=MIN_SAMPLE_SIZE)
 
-    # -- Step 3b: Statistical significance testing --
-    significance = compute_ab_significance(results, metric="replies", min_sample_size=MIN_SAMPLE_SIZE)
+    # -- Step 6b: Statistical significance testing --
+    significance = compute_ab_significance(
+        results, metric="replies", min_sample_size=MIN_SAMPLE_SIZE
+    )
     if significance.get("is_significant") and significance.get("winner_id"):
-        # Override winner with statistically significant winner if different
         sig_winner = next(
             (r for r in results if r["variant_id"] == significance["winner_id"]), None
         )
@@ -616,19 +835,40 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         significance.get("winner_id"),
     )
 
-    # -- Step 4: Compute and persist confidence updates --
+    # -- Step 7: Compute and persist confidence updates --
     confidence_updates: list[dict] = []
     try:
         updates = compute_confidence_updates(results, findings)
         for finding_id, delta in updates:
             await update_finding_confidence(finding_id, delta)
             confidence_updates.append({"finding_id": finding_id, "delta": delta})
-        logger.info("feedback_agent_node: persisted %d confidence updates", len(confidence_updates))
+        logger.info(
+            "feedback_agent_node: persisted %d confidence updates", len(confidence_updates)
+        )
     except Exception as exc:
         logger.error("feedback_agent_node: confidence update step failed: %s", exc)
 
-    # -- Step 5: Build and save learning delta --
-    learning_delta = summarize_learning(results, winner, significance)
+    # -- Step 8: Build and save enriched learning delta --
+    learning_delta = summarize_learning(
+        results, winner, significance,
+        reply_insights=reply_insights,
+        thread_summaries=thread_summaries,
+    )
+
+    # Build prospect sentiment summary from reply classifications
+    prospect_sentiment: dict[str, dict] = {}
+    for event in reply_events:
+        pid = event.get("prospect_id")
+        cls_data = event.get("reply_classification", {})
+        if pid and cls_data:
+            prospect_sentiment[pid] = {
+                "classification": cls_data.get("classification"),
+                "sentiment": cls_data.get("sentiment"),
+                "confidence": cls_data.get("confidence"),
+                "key_signals": cls_data.get("key_signals", []),
+                "suggested_action": cls_data.get("suggested_action"),
+            }
+
     entry = IntelligenceEntry(
         id=str(uuid4()),
         session_id=session_id,
@@ -636,6 +876,8 @@ async def feedback_agent_node(state: CampaignState) -> dict:
         learning_delta=learning_delta,
         confidence_updates=confidence_updates,
         winning_variant_id=winner["variant_id"] if winner else None,
+        reply_insights=reply_insights,
+        prospect_sentiment_summary=prospect_sentiment,
         created_at=datetime.now(timezone.utc),
     )
     try:
@@ -644,7 +886,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     except Exception as exc:
         logger.error("feedback_agent_node: failed to save IntelligenceEntry: %s", exc)
 
-    # -- Step 6: Build UI frames --
+    # -- Step 9: Build UI frames --
     run_id = uuid4().hex[:8]
     ab_frame = build_ab_results_frame(results, winner, f"ab-results-{run_id}", significance)
     summary_frame = build_cycle_summary_frame(
@@ -671,10 +913,20 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     if user_directive:
         directive_note = f" (per your request: {user_directive})"
 
+    # Include reply intelligence in response
+    reply_note = ""
+    if reply_insights:
+        interested = sum(1 for r in reply_insights if r.get("classification") == "interested")
+        total_replies = len(reply_insights)
+        reply_note = f" {total_replies} replies analyzed"
+        if interested > 0:
+            reply_note += f" ({interested} expressing interest)"
+        reply_note += "."
+
     response_message = (
         f"Feedback analysis complete{directive_note}. "
         f"Processed {total_events} engagement events across {len(results)} variants. "
-        f"{winner_summary}{sig_note} "
+        f"{winner_summary}{sig_note}{reply_note} "
         f"Cycle {cycle_number} learning has been captured for the next iteration."
     )
     response_frame = UIFrame(
@@ -686,6 +938,7 @@ async def feedback_agent_node(state: CampaignState) -> dict:
     ).model_dump()
 
     return {
+        "normalized_feedback_events": events,
         "engagement_results": results,
         "winning_variant_id": winner["variant_id"] if winner else None,
         "ab_significance": significance,

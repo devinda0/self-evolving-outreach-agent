@@ -14,7 +14,10 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.db.crud import (
+    append_thread_message,
+    find_deployment_by_recipient_email,
     get_deployment_by_provider_message_id,
+    get_email_thread_by_provider_message_id,
     get_feedback_event_by_dedupe_key,
     get_feedback_events_for_session,
     get_quarantine_events_for_session,
@@ -22,6 +25,8 @@ from app.db.crud import (
     save_feedback_event,
     save_quarantine_event,
     update_dlq_event,
+    update_feedback_event,
+    upsert_email_thread,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,7 +97,8 @@ def _verify_resend_signature(
 
 _RESEND_EVENT_MAP: dict[str, str] = {
     "email.sent": "sent",
-    "email.delivered": "sent",
+    "email.delivered": "delivered",
+    "email.delivery_delayed": "sent",
     "email.opened": "open",
     "email.clicked": "click",
     "email.bounced": "bounce",
@@ -173,6 +179,53 @@ async def webhook_resend(request: Request) -> dict[str, str]:
         channel="email",
         extra=payload,
     )
+    return {"status": "accepted"}
+
+
+@router.post("/webhook/resend/inbound")
+async def webhook_resend_inbound(request: Request) -> dict[str, str]:
+    """Ingest an inbound email from Resend (reply to an outreach email).
+
+    Resend forwards inbound emails to this endpoint. We extract the reply
+    content, correlate it to the original outreach email, classify the reply
+    intent, and store it as a feedback event + thread message.
+    """
+    raw_body = await request.body()
+
+    # Optional HMAC verification (same secret as outbound webhooks)
+    if settings.RESEND_WEBHOOK_SECRET:
+        svix_id = request.headers.get("svix-id", "")
+        svix_timestamp = request.headers.get("svix-timestamp", "")
+        svix_signature = request.headers.get("svix-signature", "")
+
+        if svix_id and svix_timestamp and svix_signature:
+            if not _verify_resend_signature(
+                raw_body=raw_body,
+                svix_id=svix_id,
+                svix_timestamp=svix_timestamp,
+                svix_signature=svix_signature,
+                secret=settings.RESEND_WEBHOOK_SECRET,
+            ):
+                logger.warning("webhook_resend_inbound: invalid svix signature")
+                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    import json as _json
+
+    payload: dict[str, Any] = _json.loads(raw_body)
+
+    # Extract inbound email fields from Resend's inbound payload
+    reply_info = _extract_inbound_reply(payload)
+    if not reply_info:
+        logger.warning("webhook_resend_inbound: could not extract reply info from payload")
+        await save_quarantine_event({
+            "provider": "resend_inbound",
+            "raw_payload": payload,
+            "quarantine_reason": "unparseable_inbound_email",
+            "received_at": datetime.now(tz=timezone.utc).isoformat(),
+        })
+        return {"status": "quarantined"}
+
+    await _ingest_inbound_reply(reply_info, payload)
     return {"status": "accepted"}
 
 
@@ -311,6 +364,294 @@ async def get_engagement_dashboard(session_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Inbound email reply extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_inbound_reply(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract reply information from a Resend inbound email webhook payload.
+
+    Resend inbound email payloads contain fields like:
+    - from: sender email
+    - to: recipient email (our outreach address)
+    - subject: email subject
+    - text: plain text body
+    - html: HTML body
+    - headers: includes In-Reply-To, References, Message-ID
+
+    Returns a structured dict or None if the payload is not parseable.
+    """
+    # Handle both top-level and nested data structures
+    data = payload.get("data", payload)
+
+    from_email = data.get("from") or ""
+    # Handle Resend's from field which can be "Name <email>" or just "email"
+    if isinstance(from_email, list):
+        from_email = from_email[0] if from_email else ""
+    if isinstance(from_email, dict):
+        from_email = from_email.get("email") or from_email.get("address", "")
+    # Extract email from "Name <email>" format
+    if "<" in str(from_email) and ">" in str(from_email):
+        from_email = str(from_email).split("<")[1].split(">")[0].strip()
+    from_email = str(from_email).strip().lower()
+
+    to_email = data.get("to") or ""
+    if isinstance(to_email, list):
+        to_email = to_email[0] if to_email else ""
+    if isinstance(to_email, dict):
+        to_email = to_email.get("email") or to_email.get("address", "")
+    if "<" in str(to_email) and ">" in str(to_email):
+        to_email = str(to_email).split("<")[1].split(">")[0].strip()
+    to_email = str(to_email).strip().lower()
+
+    subject = data.get("subject") or ""
+    text_body = data.get("text") or data.get("text_body") or ""
+    html_body = data.get("html") or data.get("html_body") or ""
+
+    # Extract headers for In-Reply-To correlation
+    headers = data.get("headers") or {}
+    if isinstance(headers, list):
+        headers = {h.get("name", ""): h.get("value", "") for h in headers if isinstance(h, dict)}
+    in_reply_to = headers.get("In-Reply-To") or headers.get("in-reply-to") or ""
+    references = headers.get("References") or headers.get("references") or ""
+    message_id = (
+        data.get("message_id")
+        or headers.get("Message-ID")
+        or headers.get("message-id")
+        or str(uuid4())
+    )
+
+    # Strip angle brackets from message IDs
+    in_reply_to = in_reply_to.strip().strip("<>")
+    message_id = message_id.strip().strip("<>")
+
+    if not from_email:
+        return None
+
+    return {
+        "from_email": from_email,
+        "to_email": to_email,
+        "subject": subject,
+        "text_body": text_body,
+        "html_body": html_body,
+        "message_id": message_id,
+        "in_reply_to": in_reply_to,
+        "references": references,
+    }
+
+
+async def _ingest_inbound_reply(
+    reply_info: dict[str, Any],
+    raw_payload: dict[str, Any],
+) -> None:
+    """Process an inbound email reply — correlate, classify, and store.
+
+    Correlation strategy (ordered by reliability):
+    1. In-Reply-To header → match provider_message_id in deployment records
+    2. References header → match any provider_message_id in deployment records
+    3. From email → match prospect email across active sessions
+    4. If no correlation found → quarantine the event
+
+    For each correlated reply:
+    - Store a normalized feedback event (event_type="reply") with reply body
+    - Update the email thread with the inbound message
+    - Trigger async classification (deferred to feedback agent for batch efficiency)
+    """
+    now = datetime.now(tz=timezone.utc)
+    from_email = reply_info["from_email"]
+    in_reply_to = reply_info.get("in_reply_to", "")
+    references = reply_info.get("references", "")
+    text_body = reply_info.get("text_body", "")
+    message_id = reply_info.get("message_id", str(uuid4()))
+
+    dedupe_key = f"resend_inbound:{message_id}"
+
+    # Check for duplicate
+    existing = await get_feedback_event_by_dedupe_key(dedupe_key)
+    if existing:
+        logger.debug("Duplicate inbound reply skipped: %s", dedupe_key)
+        return
+
+    # --- Correlation strategy ---
+    deployment: dict[str, Any] | None = None
+    thread: dict[str, Any] | None = None
+
+    # Strategy 1: In-Reply-To header → deployment record
+    if in_reply_to:
+        deployment = await get_deployment_by_provider_message_id(in_reply_to)
+        if deployment:
+            logger.info(
+                "_ingest_inbound_reply: correlated via In-Reply-To=%s → deployment=%s",
+                in_reply_to,
+                deployment.get("id"),
+            )
+
+    # Strategy 2: References header → deployment record
+    if not deployment and references:
+        for ref in references.split():
+            ref = ref.strip().strip("<>")
+            if ref:
+                deployment = await get_deployment_by_provider_message_id(ref)
+                if deployment:
+                    logger.info(
+                        "_ingest_inbound_reply: correlated via References ref=%s → deployment=%s",
+                        ref,
+                        deployment.get("id"),
+                    )
+                    break
+
+    # Strategy 3: Match thread by provider_message_id in thread messages
+    if not deployment and in_reply_to:
+        thread = await get_email_thread_by_provider_message_id(in_reply_to)
+        if thread:
+            deployment = await get_deployment_by_provider_message_id(
+                thread.get("messages", [{}])[0].get("message_id", "")
+            ) if thread.get("messages") else None
+            logger.info(
+                "_ingest_inbound_reply: correlated via thread lookup from=%s",
+                from_email,
+            )
+
+    # Strategy 4: Match by sender email across all sessions
+    if not deployment:
+        from app.db.crud import list_campaigns
+
+        campaigns = await list_campaigns(limit=20)
+        for campaign in campaigns:
+            session_id = campaign.get("session_id", "")
+            found = await find_deployment_by_recipient_email(session_id, from_email)
+            if found:
+                deployment = found
+                logger.info(
+                    "_ingest_inbound_reply: correlated via email match from=%s → session=%s",
+                    from_email,
+                    session_id,
+                )
+                break
+
+    if not deployment:
+        # Cannot correlate — quarantine
+        logger.warning(
+            "_ingest_inbound_reply: no correlation found for inbound from=%s — quarantining",
+            from_email,
+        )
+        await save_quarantine_event({
+            "provider": "resend_inbound",
+            "from_email": from_email,
+            "subject": reply_info.get("subject"),
+            "text_body": text_body[:500] if text_body else None,
+            "message_id": message_id,
+            "in_reply_to": in_reply_to,
+            "quarantine_reason": "no_matching_deployment_record",
+            "received_at": now.isoformat(),
+            "raw_payload": raw_payload,
+        })
+        return
+
+    # --- Store normalized feedback event ---
+    session_id = deployment.get("session_id", "")
+    variant_id = deployment.get("variant_id")
+    prospect_id = deployment.get("prospect_id")
+
+    normalized: dict[str, Any] = {
+        "provider": "resend_inbound",
+        "provider_event_id": message_id,
+        "provider_message_id": deployment.get("provider_message_id"),
+        "deployment_record_id": deployment.get("id"),
+        "session_id": session_id,
+        "variant_id": variant_id,
+        "prospect_id": prospect_id,
+        "channel": "email",
+        "event_type": "reply",
+        "event_value": None,
+        "qualitative_signal": text_body[:2000] if text_body else None,
+        "reply_body": text_body,
+        "reply_subject": reply_info.get("subject"),
+        "received_at": now.isoformat(),
+        "dedupe_key": dedupe_key,
+    }
+
+    await save_feedback_event(normalized)
+    logger.info(
+        "_ingest_inbound_reply: stored reply event | session=%s prospect=%s from=%s",
+        session_id,
+        prospect_id,
+        from_email,
+    )
+
+    # --- Update email thread ---
+    await _update_thread_with_reply(
+        session_id=session_id,
+        prospect_id=prospect_id or "",
+        prospect_email=from_email,
+        deployment=deployment,
+        reply_info=reply_info,
+        message_id=message_id,
+    )
+
+
+async def _update_thread_with_reply(
+    session_id: str,
+    prospect_id: str,
+    prospect_email: str,
+    deployment: dict[str, Any],
+    reply_info: dict[str, Any],
+    message_id: str,
+) -> None:
+    """Update or create the email thread with an inbound reply message."""
+    now = datetime.now(tz=timezone.utc)
+
+    from app.db.crud import get_email_thread_by_prospect
+    thread = await get_email_thread_by_prospect(session_id, prospect_id)
+
+    inbound_message = {
+        "message_id": message_id,
+        "direction": "inbound",
+        "subject": reply_info.get("subject"),
+        "body_text": reply_info.get("text_body"),
+        "sender_email": prospect_email,
+        "recipient_email": reply_info.get("to_email"),
+        "timestamp": now.isoformat(),
+        "classification": None,
+        "sentiment": None,
+        "key_signals": [],
+    }
+
+    if thread:
+        await append_thread_message(
+            thread_id=thread["id"],
+            message=inbound_message,
+            status="replied",
+        )
+        logger.info(
+            "_update_thread_with_reply: appended reply to thread=%s",
+            thread["id"],
+        )
+    else:
+        # Create new thread with the reply (outbound message may have been sent
+        # before thread tracking was enabled)
+        new_thread = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "prospect_id": prospect_id,
+            "prospect_email": prospect_email,
+            "variant_id": deployment.get("variant_id"),
+            "deployment_record_id": deployment.get("id"),
+            "subject": reply_info.get("subject"),
+            "messages": [inbound_message],
+            "status": "replied",
+            "reply_count": 1,
+            "last_activity_at": now.isoformat(),
+            "created_at": now.isoformat(),
+        }
+        await upsert_email_thread(new_thread)
+        logger.info(
+            "_update_thread_with_reply: created new thread for prospect=%s",
+            prospect_id,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -363,6 +704,10 @@ async def _ingest_event(
         if deployment:
             await save_feedback_event(normalized)
             logger.info("Stored feedback event: %s", dedupe_key)
+
+            # Update email thread status for engagement events
+            if event_type in ("open", "click", "bounce", "delivered"):
+                await _update_thread_status(deployment, event_type)
         else:
             await save_quarantine_event(normalized)
             logger.warning("Quarantined unmatched event: %s", dedupe_key)
@@ -382,6 +727,51 @@ async def _ingest_event(
             "status": "pending",
             "created_at": now.isoformat(),
         })
+
+
+async def _update_thread_status(deployment: dict[str, Any], event_type: str) -> None:
+    """Update the email thread status based on an engagement event.
+
+    Thread status progression: sent → delivered → opened → replied (or bounced).
+    Only upgrades status — never downgrades (e.g., opened won't revert to delivered).
+    """
+    session_id = deployment.get("session_id", "")
+    prospect_id = deployment.get("prospect_id", "")
+    if not session_id or not prospect_id:
+        return
+
+    from app.db.crud import get_email_thread_by_prospect
+
+    thread = await get_email_thread_by_prospect(session_id, prospect_id)
+    if not thread:
+        return
+
+    current_status = thread.get("status", "sent")
+    status_rank = {"sent": 0, "delivered": 1, "opened": 2, "replied": 3, "bounced": 3}
+
+    new_status_map = {
+        "delivered": "delivered",
+        "open": "opened",
+        "click": "opened",  # A click implies it was opened
+        "bounce": "bounced",
+    }
+
+    new_status = new_status_map.get(event_type)
+    if not new_status:
+        return
+
+    # Only upgrade status
+    if status_rank.get(new_status, 0) <= status_rank.get(current_status, 0):
+        return
+
+    from app.db.client import get_db
+    from app.db.collections import EMAIL_THREADS
+
+    db = get_db()
+    await db[EMAIL_THREADS].update_one(
+        {"id": thread["id"]},
+        {"$set": {"status": new_status, "last_activity_at": datetime.now(tz=timezone.utc)}},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +845,25 @@ async def get_quarantine_events(session_id: str) -> list[dict[str, Any]]:
     """Return all quarantined events for a session, ordered by received_at."""
     events = await get_quarantine_events_for_session(session_id)
     return events
+
+
+@router.get("/campaign/{session_id}/email-threads")
+async def get_session_email_threads(session_id: str) -> list[dict[str, Any]]:
+    """Return all email threads for a session, ordered by last activity."""
+    from app.db.crud import get_email_threads_for_session
+    return await get_email_threads_for_session(session_id)
+
+
+@router.get("/campaign/{session_id}/email-threads/{prospect_id}")
+async def get_prospect_email_thread(
+    session_id: str, prospect_id: str
+) -> dict[str, Any]:
+    """Return the email thread for a specific prospect in a session."""
+    from app.db.crud import get_email_thread_by_prospect
+    thread = await get_email_thread_by_prospect(session_id, prospect_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="Email thread not found")
+    return thread
 
 
 # ---------------------------------------------------------------------------
