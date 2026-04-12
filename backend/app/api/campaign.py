@@ -200,6 +200,33 @@ _NAVIGATE_INTENT_MAP: dict[str, str] = {
 }
 
 
+def _parse_clarification_response(response_text: str) -> list[dict[str, str]]:
+    """Parse combined Q&A text into structured clarification pairs.
+
+    Handles formats like:
+      "Question text: Answer text\\nAnother question: Another answer"
+      "Question text?: Answer text"
+    """
+    pairs: list[dict[str, str]] = []
+    for line in response_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Split on first colon that is followed by a space (avoid splitting URLs)
+        if ": " in line:
+            question, _, answer = line.partition(": ")
+            # Handle "Question?:" edge case
+            question = question.rstrip("?").rstrip(":").strip()
+            answer = answer.strip()
+            if question and answer:
+                pairs.append({"question": question, "answer": answer})
+            elif answer:
+                pairs.append({"question": "(context)", "answer": answer})
+        else:
+            pairs.append({"question": "(context)", "answer": line})
+    return pairs
+
+
 def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
     """Return a synthetic user message if this action should trigger a graph re-run."""
     # BriefingCard navigation buttons
@@ -207,11 +234,9 @@ def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
     if intent:
         return _INTENT_TO_USER_MESSAGE.get(intent, intent)
 
-    # Content clarification: user answered questions — re-enter as generation
+    # Content clarification: user answered individual question — re-enter as generation
     if action_id == "content_clarify_answer":
-        answer = payload.get("answer", "")
-        question_id = payload.get("question_id", "")
-        return f"[Content clarification answer for {question_id}]: {answer}"
+        return "Generate outreach content using my clarification answers"
 
     # Content clarification: user skipped — generate with current context
     if action_id == "content_skip_clarification":
@@ -288,9 +313,18 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
         return {"selected_segment_id": payload.get("segment_id")}
     if action_id == "confirm_channels":
         return {"selected_channels": payload.get("selected_channels", [])}
+    # Content clarification: individual answer → store answer and jump to generate
+    if action_id == "content_clarify_answer":
+        answer = payload.get("answer", "")
+        question_id = payload.get("question_id", "")
+        return {
+            "content_phase": "generate",
+            "content_clarifications": [{"question": question_id, "answer": answer}],
+            "content_pending_questions": [],
+        }
     # Content clarification: skip → jump to generate phase
     if action_id == "content_skip_clarification":
-        return {"content_phase": "generate"}
+        return {"content_phase": "generate", "content_pending_questions": []}
     # Content refinement: set phase so content_agent routes to refine
     if action_id == "content_refine":
         return {"content_phase": "refine"}
@@ -580,7 +614,35 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                     list(payload.keys()),
                 )
 
-                # Clarification responses should re-enter the graph as a user message
+                # Content clarification submission — parse answers and patch state
+                # before re-running graph. Must come before generic response handler.
+                if action_id == "content_clarify_submit":
+                    response_text = str(payload.get("response", ""))
+                    if response_text:
+                        clarifications = _parse_clarification_response(response_text)
+                        graph = _get_or_init_graph()
+                        cfg: RunnableConfig = {"configurable": {"thread_id": session_id}}
+                        try:
+                            await graph.aupdate_state(cfg, {
+                                "content_phase": "generate",
+                                "content_clarifications": clarifications,
+                                "content_pending_questions": [],
+                            })
+                        except Exception:
+                            logger.warning(
+                                "Could not patch state for content_clarify_submit",
+                                exc_info=True,
+                            )
+                        await _run_graph_for_message(
+                            websocket,
+                            session_id,
+                            "Generate outreach content using my clarification answers",
+                            db_state,
+                            deployment_confirmed=False,
+                        )
+                    continue
+
+                # Generic clarification responses should re-enter the graph as a user message
                 if payload.get("response"):
                     content = str(payload["response"])
                     await _run_graph_for_message(

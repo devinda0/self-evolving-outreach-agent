@@ -951,11 +951,59 @@ async def content_clarify_node(state: CampaignState) -> dict:
 
     If the agent determines it has sufficient context (confidence >= 0.8), it
     skips directly to generation. Otherwise sends a ContentClarification UI frame.
+
+    Safeguards:
+    - If clarification answers already exist, skip to generation.
+    - If we already asked questions (content_pending_questions non-empty),
+      skip to generation to prevent infinite clarification loops.
+    - Maximum 1 round of clarification questions.
     """
     session_id = state.get("session_id", "")
     logger.info("content_clarify_node called | session=%s", session_id)
 
     existing_clarifications = list(state.get("content_clarifications", []))
+    pending_questions = list(state.get("content_pending_questions", []))
+
+    # Safeguard: if user has already provided clarification answers, skip to generation
+    if existing_clarifications:
+        logger.info(
+            "content_clarify_node: %d clarification(s) already answered, routing to generate | session=%s",
+            len(existing_clarifications),
+            session_id,
+        )
+        bundle = await memory_manager.build_context_bundle(state, "content")
+        selected_segment = bundle.get("selected_segment") or get_segment_by_id(
+            state.get("selected_segment_id"),
+            state.get("segment_candidates", []),
+        )
+        top_findings = bundle.get("source_findings") or state.get("research_findings", [])[:5]
+        winning_angle_memory = bundle.get("winning_angle_memory") or state.get("prior_cycle_summary")
+        prospects = _get_selected_prospects(state)
+        last_user_message = _extract_last_user_message(state.get("messages", []))
+        gen_context = {
+            "segment": selected_segment,
+            "findings": top_findings,
+            "prospects": [p for p in prospects],
+            "winning_angle_memory": winning_angle_memory,
+            "last_user_message": last_user_message,
+            "clarifications": existing_clarifications,
+        }
+        return {
+            "content_phase": "generate",
+            "content_generation_context": gen_context,
+            "content_pending_questions": [],
+            "next_node": "content_generate",
+        }
+
+    # Safeguard: if we already asked questions once (pending_questions non-empty),
+    # the user has been through a clarification round — don't loop. Proceed to generate.
+    if pending_questions:
+        logger.info(
+            "content_clarify_node: already asked %d question(s) (pending), forcing generation | session=%s",
+            len(pending_questions),
+            session_id,
+        )
+        return {"content_phase": "generate", "content_pending_questions": [], "next_node": "content_generate"}
 
     # If we already have a generation context (user answered questions), skip to generate
     if state.get("content_generation_context"):
@@ -1300,14 +1348,27 @@ async def content_agent_node(state: CampaignState) -> dict:
 
     Sub-phase routing:
     - If content_phase == "generate": skip clarification, go to generation
+    - If content_phase == "generated": already done, go to generation (re-generate)
     - If content_phase == "refine": apply refinement
+    - If clarification answers already exist: skip to generation
     - Otherwise: start with clarification analysis
     """
     phase = state.get("content_phase")
 
     if phase == "generate":
         return await content_generate_node(state)
+    elif phase == "generated":
+        # Re-entering after generation — treat as new generation request
+        return await content_generate_node(state)
     elif phase == "refine":
         return await content_refine_node(state)
     else:
+        # Default: clarification phase.
+        # But if answers already exist, skip directly to generation.
+        if state.get("content_clarifications"):
+            logger.info(
+                "content_agent_node: clarifications already exist (phase=%s), routing to generate",
+                phase,
+            )
+            return await content_generate_node(state)
         return await content_clarify_node(state)

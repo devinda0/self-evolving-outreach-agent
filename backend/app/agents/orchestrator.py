@@ -69,7 +69,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - research: user wants market intelligence, competitor analysis, audience signals, channel trends
 - segment: user wants to define a target segment or select/score prospects (initial discovery)
 - prospect_manage: user wants to manage prospects — add/remove/edit individual prospects, upload CSV, view current prospect list, select specific prospects by name, clear prospects, or change who receives outreach. Use this when the user references specific people or asks to modify the prospect list AFTER initial discovery.
-- generate: user wants content created (outreach, social posts, briefs)
+- generate: user wants content created (outreach, social posts, briefs). Also use this when the message contains clarification answers for content generation (e.g. "Generate outreach content using my clarification answers", or text formatted as "Question: Answer" pairs related to content creation context).
 - content_refine: user wants to MODIFY, EDIT, or IMPROVE already-generated content variants. Use this when content_variants already exist and the user asks to change tone, shorten, rewrite, make more casual/formal, adjust CTAs, change subject lines, or otherwise tweak existing content. Key phrases: "make it more casual", "shorten the emails", "rewrite the subject line", "change the tone", "make it punchier", "adjust the CTA", "refine the content", "edit the variants"
 - deploy: user wants to send content to a channel
 - feedback: user is reporting engagement results or a webhook event has arrived
@@ -105,6 +105,7 @@ When the user mentions cycles:
 - If user asks about replies, received emails, engagement status, or campaign metrics (e.g. "are there any replies?", "did anyone respond?", "what are the received emails?", "show me engagement results", "is there any reply from X?", "check for responses", "what is the current status?") → "answer"
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
+- If user says "Generate outreach content using my clarification answers" or similar → "generate" (content clarification answers have been submitted)
 - Only use "clarify" as a last resort when the message is truly unintelligible or has multiple conflicting interpretations
 - Never hallucinate a mode. If genuinely unclear → "clarify"
 - Do not generate any content. Only classify and route.
