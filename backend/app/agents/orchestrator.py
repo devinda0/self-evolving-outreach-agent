@@ -107,6 +107,7 @@ When the user mentions cycles:
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
 - If user says "Generate outreach content using my clarification answers" or similar → "generate" (content clarification answers have been submitted)
+- If "Content clarification questions pending" count > 0 in context, the user's message almost certainly contains answers to those questions → "generate" (do NOT classify as update_context or clarify)
 - Only use "clarify" as a last resort when the message is truly unintelligible or has multiple conflicting interpretations
 - Never hallucinate a mode. If genuinely unclear → "clarify"
 - Do not generate any content. Only classify and route.
@@ -325,6 +326,7 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
         cycle_context=cycle_context,
     )
 
+    pending_qs = state.get("content_pending_questions", []) or []
     prompt = f"""Campaign context:
 - Product: {task.get("product_name", "Unknown")}
 - Description: {state.get("product_description", "No description")}
@@ -333,6 +335,7 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
 - Cycle: {cycle_number}
 - Prior intent: {stage.get("previous_intent", "none")}
 - Content variants exist: {"yes (" + str(len(state.get("content_variants", []))) + " variants)" if state.get("content_variants") else "no"}
+- Content clarification questions pending: {len(pending_qs)} {"(user's message likely contains answers to these questions → route to 'generate')" if pending_qs else ""}
 
 {cycle_context}
 

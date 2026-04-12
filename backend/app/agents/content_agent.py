@@ -1195,7 +1195,28 @@ async def content_generate_node(state: CampaignState) -> dict:
         )
         prospects = _get_selected_prospects(state)
         last_user_message = _extract_last_user_message(state.get("messages", []))
-        clarifications = state.get("content_clarifications", [])
+        clarifications = list(state.get("content_clarifications", []) or [])
+
+        # If no stored clarifications but questions were previously asked, the user
+        # may have replied with free-text answers rather than clicking buttons.
+        # Extract Q&A pairs from the latest user message as a fallback.
+        if not clarifications and state.get("content_pending_questions"):
+            raw_answer = last_user_message or ""
+            if raw_answer and raw_answer != "Generate outreach content using my clarification answers":
+                for line in raw_answer.replace("\\n", "\n").split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if ": " in line:
+                        q, _, a = line.partition(": ")
+                        clarifications.append({"question": q.rstrip("?").strip(), "answer": a.strip()})
+                    else:
+                        clarifications.append({"question": "(context)", "answer": line})
+                if clarifications:
+                    logger.info(
+                        "content_generate_node: extracted %d clarification(s) from user message | session=%s",
+                        len(clarifications), session_id,
+                    )
     else:
         selected_segment = gen_ctx.get("segment")
         top_findings = gen_ctx.get("findings", [])

@@ -597,7 +597,51 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                 content = str(data.get("content", "")).strip()
                 if not content:
                     continue
-                # User messages never carry a pre-confirmed deployment.
+
+                # If there are pending content clarification questions, treat this
+                # message as the user's answers — parse and inject them, then run
+                # generation directly rather than relying on the orchestrator to
+                # correctly classify what can look like product-context prose.
+                _pending_qs: list = []
+                try:
+                    _g = _get_or_init_graph()
+                    _cfg_snap: RunnableConfig = {"configurable": {"thread_id": session_id}}
+                    _snap = await _g.aget_state(_cfg_snap)  # type: ignore[arg-type]
+                    if _snap and _snap.values:
+                        _pending_qs = _snap.values.get("content_pending_questions", []) or []
+                except Exception:
+                    pass
+
+                if _pending_qs:
+                    logger.info(
+                        "ws: intercepting free-text clarification answer | session=%s pending_qs=%d",
+                        session_id, len(_pending_qs),
+                    )
+                    clarifications = _parse_clarification_response(content)
+                    if not clarifications:
+                        # Whole message is one context blob
+                        clarifications = [{"question": "(user context)", "answer": content}]
+                    try:
+                        _g = _get_or_init_graph()
+                        _cfg_patch: RunnableConfig = {"configurable": {"thread_id": session_id}}
+                        await _g.aupdate_state(_cfg_patch, {  # type: ignore[arg-type]
+                            "content_phase": "generate",
+                            "content_clarifications": clarifications,
+                            "content_pending_questions": [],
+                        })
+                    except Exception:
+                        logger.warning(
+                            "ws: could not patch state for free-text clarification",
+                            exc_info=True,
+                        )
+                    await _run_graph_for_message(
+                        websocket, session_id,
+                        "Generate outreach content using my clarification answers",
+                        db_state, deployment_confirmed=False,
+                    )
+                    continue
+
+                # Normal user message path — let the orchestrator classify intent.
                 await _run_graph_for_message(
                     websocket, session_id, content, db_state, deployment_confirmed=False
                 )
