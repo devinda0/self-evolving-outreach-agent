@@ -34,6 +34,7 @@ VALID_INTENTS = frozenset(
         "segment",
         "prospect_manage",
         "generate",
+        "content_refine",
         "deploy",
         "feedback",
         "refined_cycle",
@@ -50,6 +51,7 @@ INTENT_TO_NODE = {
     "segment": "segment",
     "prospect_manage": "prospect_manage",
     "generate": "generate",
+    "content_refine": "content_refine",
     "deploy": "deploy",
     "feedback": "feedback",
     "refined_cycle": "refined_cycle",
@@ -68,6 +70,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - segment: user wants to define a target segment or select/score prospects (initial discovery)
 - prospect_manage: user wants to manage prospects — add/remove/edit individual prospects, upload CSV, view current prospect list, select specific prospects by name, clear prospects, or change who receives outreach. Use this when the user references specific people or asks to modify the prospect list AFTER initial discovery.
 - generate: user wants content created (outreach, social posts, briefs)
+- content_refine: user wants to MODIFY, EDIT, or IMPROVE already-generated content variants. Use this when content_variants already exist and the user asks to change tone, shorten, rewrite, make more casual/formal, adjust CTAs, change subject lines, or otherwise tweak existing content. Key phrases: "make it more casual", "shorten the emails", "rewrite the subject line", "change the tone", "make it punchier", "adjust the CTA", "refine the content", "edit the variants"
 - deploy: user wants to send content to a channel
 - feedback: user is reporting engagement results or a webhook event has arrived
 - refined_cycle: user wants to proceed to the next cycle, start a new iteration, restart the loop, or reference moving forward. This captures the current cycle's learnings and advances to the next cycle. Key phrases: "next cycle", "proceed to cycle N", "start over", "iterate", "new cycle", "run another cycle", "let's do cycle N"
@@ -95,6 +98,9 @@ When the user mentions cycles:
 - "configure MCP server" or "add mcp" or "connect brightdata" or any MCP/tool server URL → "mcp_configure"
 - "list mcp servers" or "show connected tools" or "remove mcp server" → "mcp_configure"
 - "proceed to next cycle" or "let's do cycle 2" or "start over with learnings" or "iterate" or "next round" → "refined_cycle"
+- If content variants already exist and the user asks to modify/edit/improve them (tone change, shorten, rewrite, adjust CTA, etc.) → "content_refine"
+- "make it more casual" or "shorten the emails" or "rewrite the subject lines" or "change the tone to professional" or "make it punchier" → "content_refine" (ONLY when variants exist)
+- If no content variants exist yet and user asks for content modifications → "generate" (treat as new generation request)
 - If user asks a direct question (e.g. "what is our target market?", "how many variants did we create?", "what should I focus on?") → "answer"
 - If user provides new info without requesting an action (e.g. "our company focuses on B2B SaaS", "actually our target market is enterprise HR teams", "our budget is $5000/month") → "update_context"
 - If user answers a previous clarification question or provides info the system asked for → "update_context"
@@ -104,20 +110,20 @@ When the user mentions cycles:
 
 ## Output format (strict JSON, no prose, no markdown code blocks)
 {{
-  "current_intent": "<one of: research, segment, prospect_manage, generate, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
+  "current_intent": "<one of: research, segment, prospect_manage, generate, content_refine, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
   "reasoning": "<one sentence explaining your classification>",
   "user_directive": "<a clear, actionable summary of WHAT the user wants the next agent to do — capture specific focus areas, constraints, preferences, and tone from the user's message. Examples: 'Research competitor pricing strategies for enterprise SaaS', 'Generate 3 email variants with a casual, friendly tone focused on cost savings', 'Deploy only the ROI-focused variant to top 3 prospects'. This MUST reflect the user's specific request, not a generic description of what the agent does.>",
   "clarification_question": "<only if current_intent=clarify, else null>",
   "clarification_options": ["<option1>", "<option2>", "..."],
-  "next_node": "<research, segment, generate, deploy, feedback, refined_cycle, answer, update_context, clarify>"
+  "next_node": "<research, segment, generate, content_refine, deploy, feedback, refined_cycle, answer, update_context, clarify>"
 }}"""
 
 DEFAULT_CLARIFICATION = (
     "I didn't quite catch that — could you clarify what you'd like to do? "
-    "(research / segment / manage prospects / generate / deploy / feedback / configure MCP)"
+    "(research / segment / manage prospects / generate / refine content / deploy / feedback / configure MCP)"
 )
 
-DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Generate content", "Deploy campaign", "Report feedback", "Configure MCP server"]
+DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Generate content", "Refine content", "Deploy campaign", "Report feedback", "Configure MCP server"]
 
 
 def _get_llm():
@@ -323,6 +329,7 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
 - Stage: {stage.get("active_stage_summary", "starting")}
 - Cycle: {cycle_number}
 - Prior intent: {stage.get("previous_intent", "none")}
+- Content variants exist: {"yes (" + str(len(state.get("content_variants", []))) + " variants)" if state.get("content_variants") else "no"}
 
 {cycle_context}
 

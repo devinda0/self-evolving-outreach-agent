@@ -246,6 +246,10 @@ export default function VariantGrid({ frame, onAction }: Props) {
       a.id === "deploy-selected"
   );
 
+  const refineAction = frame.actions.find(
+    (a: UIAction) => a.action_type === "content_refine" || a.id === "refine-content"
+  );
+
   function toggleSelect(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -285,6 +289,14 @@ export default function VariantGrid({ frame, onAction }: Props) {
         action: "confirm_variants",
         variant_ids: ids,
       });
+    }
+  }
+
+  function handleRefine() {
+    if (refineAction) {
+      onAction(frame.instance_id, refineAction.id, refineAction.payload);
+    } else {
+      onAction(frame.instance_id, "refine-content", {});
     }
   }
 
@@ -535,6 +547,20 @@ export default function VariantGrid({ frame, onAction }: Props) {
         <button type="button" className="btn-ghost" onClick={handleClearAll} disabled={isPendingAction}>
           Clear
         </button>
+        {refineAction && (
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={isPendingAction}
+            onClick={handleRefine}
+            style={{
+              color: "var(--warning)",
+              borderColor: "rgba(255,212,59,0.3)",
+            }}
+          >
+            Refine Content
+          </button>
+        )}
         <button
           type="button"
           className="btn-accent"

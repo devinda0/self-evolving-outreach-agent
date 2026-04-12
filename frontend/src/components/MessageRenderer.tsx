@@ -14,6 +14,7 @@ import {
   CycleSummary,
   ResearchProgress,
   ClarificationPrompt,
+  ContentClarification,
   ErrorCard,
   FeedbackPrompt,
   ManualFeedbackInput,
@@ -247,6 +248,8 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <ResearchProgress {...props} />;
     case "ClarificationPrompt":
       return <ClarificationPrompt {...props} />;
+    case "ContentClarification":
+      return <ContentClarification {...props} />;
     case "FeedbackPrompt":
       return <FeedbackPrompt {...props} />;
     case "ManualFeedbackInput":

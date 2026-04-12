@@ -70,6 +70,11 @@ def _make_state(**overrides) -> dict:
         "content_variants": [],
         "selected_variant_ids": [],
         "visual_artifacts": [],
+        "content_phase": None,
+        "content_clarifications": [],
+        "content_pending_questions": [],
+        "content_generation_context": None,
+        "content_refinement_history": [],
         "selected_channels": [],
         "ab_split_plan": None,
         "deployment_confirmed": False,
@@ -267,7 +272,8 @@ async def test_content_agent_node_returns_variants():
     from unittest.mock import AsyncMock, patch
 
     state = _make_state(
-        briefing_summary="Test briefing: competitor gap identified in enterprise segment."
+        briefing_summary="Test briefing: competitor gap identified in enterprise segment.",
+        content_phase="generate",
     )
     with (
         patch("app.agents.content_agent._get_llm", return_value=None),
@@ -473,6 +479,7 @@ async def test_graph_generate_route_via_content_node():
     state = _make_state(
         next_node="generate",
         briefing_summary="Test briefing: ROI opportunity identified for mid-market segment.",
+        content_phase="generate",
     )
     with (
         patch("app.agents.content_agent._get_llm", return_value=None),

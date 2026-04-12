@@ -5,6 +5,7 @@ import type { UIFrame } from "../../store/campaignStore";
 export { default as BriefingCard } from "../BriefingCard";
 export { default as ResearchProgress } from "../ResearchProgress";
 export { default as ClarificationPrompt } from "../ClarificationPrompt";
+export { default as ContentClarification } from "../ContentClarification";
 export { default as SegmentSelector } from "../SegmentSelector";
 export { default as ProspectPicker } from "../ProspectPicker";
 export { default as ProspectManager } from "../ProspectManager";

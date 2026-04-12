@@ -12,7 +12,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
-from app.agents.content_agent import content_agent_node
+from app.agents.content_agent import content_agent_node, content_refine_node
 from app.agents.cycle_manager import refined_cycle_node
 from app.agents.deployment_agent import deployment_agent_node
 from app.agents.feedback_agent import feedback_agent_node
@@ -60,6 +60,7 @@ def route_from_orchestrator(state: CampaignState) -> str:
         "segment",
         "prospect_manage",
         "generate",
+        "content_refine",
         "deploy",
         "feedback",
         "refined_cycle",
@@ -128,6 +129,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_node("segment_agent", segment_agent_node)
     builder.add_node("prospect_manage", prospect_manage_node)
     builder.add_node("content_agent", content_agent_node)
+    builder.add_node("content_refine", content_refine_node)
     builder.add_node("deployment_agent", deployment_agent_node)
     builder.add_node("feedback_agent", feedback_agent_node)
     builder.add_node("refined_cycle", refined_cycle_node)
@@ -151,6 +153,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
             "segment": "segment_agent",
             "prospect_manage": "prospect_manage",
             "generate": "content_agent",
+            "content_refine": "content_refine",
             "deploy": "deployment_agent",
             "feedback": "feedback_agent",
             "refined_cycle": "refined_cycle",
@@ -173,6 +176,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_edge("segment_agent", END)
     builder.add_edge("prospect_manage", END)
     builder.add_edge("content_agent", END)
+    builder.add_edge("content_refine", END)
     builder.add_edge("deployment_agent", END)
     builder.add_edge("feedback_agent", END)
     builder.add_edge("refined_cycle", END)

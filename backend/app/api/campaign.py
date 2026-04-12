@@ -50,6 +50,7 @@ _PROGRESS_NODES = frozenset(
         "segment_agent",
         "prospect_manage",
         "content_agent",
+        "content_refine",
         "deployment_agent",
         "feedback_agent",
         "clarify",
@@ -145,6 +146,12 @@ def _new_campaign_state(session_id: str, req: StartCampaignRequest) -> dict[str,
         "content_variants": [],
         "selected_variant_ids": [],
         "visual_artifacts": [],
+        # Content agent sub-phases
+        "content_phase": None,
+        "content_clarifications": [],
+        "content_pending_questions": [],
+        "content_generation_context": None,
+        "content_refinement_history": [],
         # Deployment
         "selected_channels": [],
         "ab_split_plan": None,
@@ -199,6 +206,20 @@ def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
     intent = _NAVIGATE_INTENT_MAP.get(action_id)
     if intent:
         return _INTENT_TO_USER_MESSAGE.get(intent, intent)
+
+    # Content clarification: user answered questions — re-enter as generation
+    if action_id == "content_clarify_answer":
+        answer = payload.get("answer", "")
+        question_id = payload.get("question_id", "")
+        return f"[Content clarification answer for {question_id}]: {answer}"
+
+    # Content clarification: user skipped — generate with current context
+    if action_id == "content_skip_clarification":
+        return "Generate outreach content with the current context"
+
+    # Content refinement: re-enter graph for refinement
+    if action_id == "content_refine":
+        return "Refine the existing content variants"
 
     # VariantGrid confirm → deploy
     if action_id in ("deploy_selected", "confirm_selected", "confirm_variants"):
@@ -267,6 +288,12 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
         return {"selected_segment_id": payload.get("segment_id")}
     if action_id == "confirm_channels":
         return {"selected_channels": payload.get("selected_channels", [])}
+    # Content clarification: skip → jump to generate phase
+    if action_id == "content_skip_clarification":
+        return {"content_phase": "generate"}
+    # Content refinement: set phase so content_agent routes to refine
+    if action_id == "content_refine":
+        return {"content_phase": "refine"}
     return {}
 
 
@@ -400,7 +427,7 @@ async def _run_graph_for_message(
                     else ""
                 )
                 # Skip nodes that produce structured JSON, not user-facing prose
-                if node in ("orchestrator", "clarify", "content_agent", "deployment_agent", "answer", "update_context", "prospect_manage", "mcp_configure"):
+                if node in ("orchestrator", "clarify", "content_agent", "content_refine", "deployment_agent", "answer", "update_context", "prospect_manage", "mcp_configure"):
                     continue
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:

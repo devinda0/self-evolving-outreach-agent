@@ -58,6 +58,13 @@ class CampaignState(TypedDict):
     selected_variant_ids: list[str]
     visual_artifacts: list[dict]
 
+    # Content agent sub-phases
+    content_phase: Optional[str]  # "clarify" | "generate" | "refine" | None
+    content_clarifications: list[dict]  # Q&A pairs resolved during clarification
+    content_pending_questions: list[dict]  # Questions waiting for user answers
+    content_generation_context: Optional[dict]  # Resolved context snapshot for generation
+    content_refinement_history: list[dict]  # History of refinement prompts and diffs
+
     # Deployment stage
     selected_channels: list[str]
     ab_split_plan: Optional[dict]
