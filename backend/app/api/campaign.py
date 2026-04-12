@@ -222,6 +222,26 @@ def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
     if action_id == "select_segment":
         return "Use the selected segment and show prospects"
 
+    # ChannelSelector confirm → generate content for selected channels
+    if action_id == "confirm_channels":
+        return "Generate outreach content for the selected channels"
+
+    # DeliveryStatusCard post-deployment actions
+    if action_id == "view_results":
+        return "Show me the campaign results and engagement metrics"
+    if action_id == "run_next_cycle":
+        return "Process the campaign results and run the next outreach cycle"
+    if action_id == "retry_failed":
+        return "Retry sending to the failed recipients"
+
+    # CycleSummary / ABResults learnings
+    if action_id == "view_findings":
+        return "Show me the research findings and key learnings from this cycle"
+
+    # ProspectManager CSV upload completion
+    if action_id == "csv_upload_complete":
+        return "Show me the current prospect list"
+
     return None
 
 
@@ -245,6 +265,8 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
         return {}  # handled by graph re-run
     if action_id == "select_segment":
         return {"selected_segment_id": payload.get("segment_id")}
+    if action_id == "confirm_channels":
+        return {"selected_channels": payload.get("selected_channels", [])}
     return {}
 
 
@@ -588,6 +610,9 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                     frames = await _apply_ui_action(session_id, action_id, payload)
                     for frame in frames:
                         await _send_json_safe(websocket, frame)
+                    # Always terminate the action so the frontend clears the
+                    # waiting/processing indicator, even for state-only paths.
+                    await _send_json_safe(websocket, {"type": "token_end"})
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", session_id)
