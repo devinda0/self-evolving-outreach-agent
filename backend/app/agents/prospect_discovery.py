@@ -73,14 +73,18 @@ Focus on:
 - People whose roles align with the product's value proposition
 - Companies showing signals of need (growth, hiring, funding, pain points)
 
+CRITICAL REQUIREMENT:
+You MUST provide a realistic email address or a valid LinkedIn profile URL for each prospect.
+Without an email or LinkedIn ID, the prospect is useless for outreach. Ensure at least one communication method is present for each prospect.
+
 Output strict JSON array, no markdown, no prose:
 [
   {{
     "name": "Full Name",
     "title": "Job Title",
     "company": "Company Name",
-    "email": null,
-    "linkedin_url": null,
+    "email": "valid@email.com or null",
+    "linkedin_url": "valid URL or null",
     "rationale": "Why this profile is a good target based on research"
   }}
 ]"""
@@ -110,14 +114,19 @@ Product: {product_name}
 Extract real prospect profiles from these search results. Only include people who appear to be
 real individuals with verifiable information. Do not fabricate details.
 
+CRITICAL REQUIREMENT: 
+You MUST successfully extract either a valid email address or a valid LinkedIn profile URL for each prospect.
+If a prospect does not have an email OR a LinkedIn URL available in the search results, DO NOT include them in the results.
+Prospects without a communication method are useless for outreach.
+
 Output strict JSON array, no markdown:
 [
   {{
     "name": "Full Name",
     "title": "Job Title",
     "company": "Company Name",
-    "email": null,
-    "linkedin_url": "URL if found",
+    "email": "valid@email.com or null",
+    "linkedin_url": "valid linkedin URL or null",
     "rationale": "Brief explanation of why they match"
   }}
 ]
@@ -236,7 +245,7 @@ async def _search_based_discovery(
     except Exception as e:
         logger.warning("Prospect extraction from search failed: %s", e)
 
-    return prospects
+    return [p for p in prospects if p.get("email") or p.get("linkedin_url")]
 
 
 async def _generate_discovery_queries(
@@ -294,7 +303,8 @@ async def _llm_profile_generation(
         response = await llm.ainvoke([{"role": "user", "content": prompt}])
         profiles = _parse_json_response(response.content)
         if isinstance(profiles, list):
-            return [_normalize_prospect(p) for p in profiles[:num_prospects]]
+            valid_profiles = [_normalize_prospect(p) for p in profiles]
+            return [p for p in valid_profiles if p.get("email") or p.get("linkedin_url")][:num_prospects]
     except Exception as e:
         logger.warning("LLM prospect generation failed: %s", e)
 

@@ -130,8 +130,8 @@ async def load_prospects(
         ref_path = Path(prospect_pool_ref)
         if ref_path.suffix.lower() == ".csv" and ref_path.is_file():
             prospects = await load_prospects_from_csv(str(ref_path))
-            # Filter out prospects without email
-            return [p for p in prospects if p.get("email")]
+            # Filter out prospects without a communication method
+            return [p for p in prospects if p.get("email") or p.get("linkedin_url")]
         logger.warning("Unrecognized prospect_pool_ref '%s'", prospect_pool_ref)
 
     # Try research-powered discovery when findings are available
@@ -146,14 +146,14 @@ async def load_prospects(
             )
             if discovered:
                 logger.info("Discovered %d prospects via research", len(discovered))
-                # Filter out prospects without email
-                return [p for p in discovered if p.get("email")]
+                # Filter out prospects without a communication method
+                return [p for p in discovered if p.get("email") or p.get("linkedin_url")]
         except Exception as exc:
             logger.warning("Prospect discovery failed (%s) — falling back to seed list", exc)
 
     logger.info("Using demo seed list as fallback")
-    # Filter out prospects without email
-    return [p for p in DEMO_SEED_PROSPECTS if p.get("email")]
+    # Filter out prospects without a communication method
+    return [p for p in DEMO_SEED_PROSPECTS if p.get("email") or p.get("linkedin_url")]
 
 
 async def load_prospects_from_csv(file_path: str) -> list[dict[str, Any]]:
