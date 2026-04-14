@@ -41,6 +41,7 @@ interface CampaignStore {
   isWaitingForResponse: boolean;
   currentStage: string | null;
   wsStatus: WsStatus;
+  campaignName: string | null;
 
   setSessionId: (id: string) => void;
   addUserMessage: (content: string) => void;
@@ -51,6 +52,7 @@ interface CampaignStore {
   setWaitingForResponse: (val: boolean) => void;
   setWsStatus: (status: WsStatus) => void;
   setCurrentStage: (stage: string | null) => void;
+  setCampaignName: (name: string | null) => void;
   addErrorMessage: (message: string) => void;
   resetSession: () => void;
 }
@@ -69,8 +71,10 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
   isWaitingForResponse: false,
   currentStage: null,
   wsStatus: "disconnected",
+  campaignName: null,
 
   setSessionId: (id) => set({ sessionId: id }),
+  setCampaignName: (name) => set({ campaignName: name }),
 
   addUserMessage: (content) =>
     set((s) => ({
@@ -142,5 +146,6 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
       isWaitingForResponse: false,
       currentStage: null,
       wsStatus: "disconnected",
+      campaignName: null,
     }),
 }));

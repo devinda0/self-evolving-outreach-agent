@@ -27,7 +27,7 @@ function CampaignHistory({
   onResume,
   onNewCampaign,
 }: {
-  onResume: (id: string) => void;
+  onResume: (id: string, name: string) => void;
   onNewCampaign: () => void;
 }) {
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
@@ -179,7 +179,7 @@ function CampaignHistory({
             {campaigns.map((c, i) => (
               <button
                 key={c.session_id}
-                onClick={() => onResume(c.session_id)}
+                onClick={() => onResume(c.session_id, c.product_name || "Untitled Campaign")}
                 className="campaign-history-item animate-fade-in-up"
                 style={{ animationDelay: `${i * 40}ms` }}
               >
@@ -246,7 +246,7 @@ function CampaignHistory({
 // Session start form
 // ---------------------------------------------------------------------------
 
-function SessionForm({ onStart, onBack }: { onStart: (id: string) => void; onBack: () => void }) {
+function SessionForm({ onStart, onBack }: { onStart: (id: string, name: string) => void; onBack: () => void }) {
   const [productName, setProductName] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [targetMarket, setTargetMarket] = useState("");
@@ -278,7 +278,7 @@ function SessionForm({ onStart, onBack }: { onStart: (id: string) => void; onBac
       }
 
       const data: { session_id: string } = await res.json();
-      onStart(data.session_id);
+      onStart(data.session_id, productName);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setError("Request timed out — is the backend running?");
@@ -458,6 +458,7 @@ function SessionForm({ onStart, onBack }: { onStart: (id: string) => void; onBac
 function ChatThread() {
   const messages = useCampaignStore((s) => s.messages);
   const sessionId = useCampaignStore((s) => s.sessionId);
+  const campaignName = useCampaignStore((s) => s.campaignName);
   const wsStatus = useCampaignStore((s) => s.wsStatus);
   const currentStage = useCampaignStore((s) => s.currentStage);
   const isStreaming = useCampaignStore((s) => s.isStreaming);
@@ -508,7 +509,7 @@ function ChatThread() {
     <div className="flex h-screen flex-col" style={{ background: "var(--bg-base)" }}>
       {/* Header */}
       <header
-        className="flex shrink-0 items-center justify-between px-5 py-3"
+        className="relative flex shrink-0 items-center justify-between px-5 py-3"
         style={{
           background: "var(--bg-surface-1)",
           borderBottom: "1px solid var(--border-subtle)",
@@ -549,6 +550,14 @@ function ChatThread() {
             Signal to Action
           </span>
         </div>
+
+        {campaignName && (
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate max-w-[200px] md:max-w-[400px]">
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
+              {campaignName}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           <button
@@ -697,6 +706,7 @@ function ChatThread() {
 export default function App() {
   const sessionId = useCampaignStore((s) => s.sessionId);
   const setSessionId = useCampaignStore((s) => s.setSessionId);
+  const setCampaignName = useCampaignStore((s) => s.setCampaignName);
   const [view, setView] = useState<"history" | "new">("history");
 
   // If session is active, show chat
@@ -706,13 +716,22 @@ export default function App() {
 
   // New campaign form
   if (view === "new") {
-    return <SessionForm onStart={setSessionId} onBack={() => setView("history")} />;
+    return <SessionForm 
+      onStart={(id, name) => { 
+        setCampaignName(name); 
+        setSessionId(id); 
+      }} 
+      onBack={() => setView("history")} 
+    />;
   }
 
   // Default: show history
   return (
     <CampaignHistory
-      onResume={setSessionId}
+      onResume={(id, name) => { 
+        setCampaignName(name); 
+        setSessionId(id); 
+      }}
       onNewCampaign={() => setView("new")}
     />
   );
