@@ -19,7 +19,7 @@ from app.models.ui_frames import UIAction, UIFrame
 
 logger = logging.getLogger(__name__)
 
-BRIEFING_PROMPT = """You are a senior research analyst producing an executive briefing.
+BRIEFING_PROMPT = """You are a senior research analyst producing an extremely detailed, comprehensive executive briefing.
 
 Product: {product_name}
 Target Market: {target_market}
@@ -29,11 +29,11 @@ Research findings from {thread_count} parallel threads ({finding_count} total fi
 
 {findings_text}
 
-Produce a structured briefing summarizing what was discovered. Include:
-1. An executive summary (2-3 sentences capturing the most important insights)
-2. Key themes across threads
+Produce a structured, in-depth briefing summarizing what was discovered. Include:
+1. A highly comprehensive executive summary (6-10 sentences, deep analysis of market conditions, competitor movements, and user insights. Do not be brief.)
+2. Specific content angles to use in outreach based on findings
 3. Top opportunities for outreach
-4. Research gaps that need further investigation
+4. Critical research gaps that need further investigation (be specific and detailed)
 5. A concise response_message (1-2 sentences) that directly addresses the user's request and tells them what you found
 
 If a user directive is provided above, ensure the executive summary and response_message focus on what the user asked for.
@@ -41,9 +41,9 @@ If a user directive is provided above, ensure the executive summary and response
 Output strict JSON, no markdown, no prose:
 {{
   "executive_summary": "...",
-  "key_themes": ["theme 1", "theme 2", ...],
+  "content_angles": ["angle 1", "angle 2", "angle 3", "angle 4"],
   "top_opportunities": ["opp 1", "opp 2", ...],
-  "gaps": ["gap 1", "gap 2", ...],
+  "gaps": ["Detailed gap 1", "Detailed gap 2", "Detailed gap 3", ...],
   "recommended_next_steps": ["step 1", "step 2", ...],
   "response_message": "A brief, direct response to the user about what was found"
 }}"""
@@ -109,13 +109,15 @@ def _mock_briefing(findings: list[dict], user_directive: str | None = None) -> d
     directive_detail = f" regarding '{user_directive}'" if user_directive else ""
     return {
         "executive_summary": (
-            f"Research across {len(thread_types)} dimensions produced {len(findings)} findings. "
-            f"Key signals include: {'; '.join(claims[:3]) or 'pending deeper analysis'}."
+            f"Comprehensive research across {len(thread_types)} dimensions produced {len(findings)} findings. "
+            f"Key signals include: {'; '.join(claims[:3]) or 'pending deeper analysis'}. "
+            "The market shows significant dynamic behavior requiring nuanced outreach strategies. "
+            "We have uncovered overlapping needs that require a localized value proposition."
         ),
-        "key_themes": [f"Theme from {t} analysis" for t in thread_types],
+        "content_angles": [f"Angle based on {t} analysis" for t in thread_types],
         "top_opportunities": [f.get("actionable_implication", "") for f in findings[:3]],
         "gaps": [
-            f"Deeper {t} research needed"
+            f"Deeper {t} research needed to fully validate hypothesis regarding customer pain points"
             for t in thread_types
             if t not in {f.get("thread_type") for f in findings if f.get("confidence", 0) > 0.6}
         ],
@@ -201,6 +203,9 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
         cycle_number=state.get("cycle_number", 1),
         user_directive=user_directive,
     )
+    
+    # Inject top findings globally into the briefing so the frontend can display them
+    briefing["top_findings"] = deduplicated[:10]
 
     # Persist all findings to MongoDB
     for finding in deduplicated:
