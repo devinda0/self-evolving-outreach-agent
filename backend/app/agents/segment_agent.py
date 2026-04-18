@@ -34,78 +34,7 @@ logger = logging.getLogger(__name__)
 # Demo seed list — used when no prospect source is provided
 # ---------------------------------------------------------------------------
 
-DEMO_SEED_PROSPECTS: list[dict[str, Any]] = [
-    {
-        "name": "Alice Chen",
-        "title": "VP Sales",
-        "company": "Acme SaaS",
-        "email": "alice@acme.io",
-        "linkedin_url": "https://linkedin.com/in/alicechen",
-    },
-    {
-        "name": "Bob Martinez",
-        "title": "Head of Growth",
-        "company": "ScaleUp Inc",
-        "email": "bob@scaleup.io",
-        "linkedin_url": "https://linkedin.com/in/bobmartinez",
-    },
-    {
-        "name": "Carol Nguyen",
-        "title": "CRO",
-        "company": "CloudFirst",
-        "email": "carol@cloudfirst.com",
-        "linkedin_url": "https://linkedin.com/in/carolnguyen",
-    },
-    {
-        "name": "David Kim",
-        "title": "VP Marketing",
-        "company": "DataDriven Co",
-        "email": "david@datadriven.co",
-        "linkedin_url": "https://linkedin.com/in/davidkim",
-    },
-    {
-        "name": "Emily Ross",
-        "title": "Director of Partnerships",
-        "company": "NexGen Labs",
-        "email": "emily@nexgenlabs.io",
-        "linkedin_url": "https://linkedin.com/in/emilyross",
-    },
-    {
-        "name": "Frank Okafor",
-        "title": "VP Business Development",
-        "company": "Synapse AI",
-        "email": "frank@synapseai.com",
-        "linkedin_url": "https://linkedin.com/in/frankokafor",
-    },
-    {
-        "name": "Grace Liu",
-        "title": "Head of Revenue",
-        "company": "FinStack",
-        "email": "grace@finstack.io",
-        "linkedin_url": "https://linkedin.com/in/graceliu",
-    },
-    {
-        "name": "Hasan Ali",
-        "title": "VP Sales",
-        "company": "PipelineHQ",
-        "email": "hasan@pipelinehq.com",
-        "linkedin_url": "https://linkedin.com/in/hasanali",
-    },
-    {
-        "name": "Irene Volkov",
-        "title": "Growth Lead",
-        "company": "ShipFast Dev",
-        "email": "irene@shipfast.dev",
-        "linkedin_url": "https://linkedin.com/in/irenevolkov",
-    },
-    {
-        "name": "James Park",
-        "title": "Director of Sales",
-        "company": "OutboundOS",
-        "email": "james@outboundos.io",
-        "linkedin_url": "https://linkedin.com/in/jamespark",
-    },
-]
+DEMO_SEED_PROSPECTS: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

@@ -224,6 +224,9 @@ async def _dispatch_send(
         msg_id = await mock_send(channel, prospect, personalize_variant(variant, prospect))
         return msg_id, None
 
+    if not prospect.get("email"):
+        return None, "No email address found for prospect, but intended channel is email."
+
     try:
         msg_id = await send_via_email(variant, prospect, session_id)
         return msg_id, None
@@ -393,14 +396,14 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     # Fallback: if no explicit selection, use all prospects
     if not selected_prospects:
         selected_prospects = all_prospects
-    # Filter out prospects without email
-    selected_prospects = [p for p in selected_prospects if p.get("email")]
+    # Filter out prospects without external contact methods
+    selected_prospects = [p for p in selected_prospects if p.get("email") or p.get("linkedin_url")]
 
-    # DB fallback: for older sessions where prospect_cards were saved without email,
-    # reload from DB and merge the email field in.
+    # DB fallback: for older sessions where prospect_cards were saved without contact methods,
+    # reload from DB and merge the fields in.
     if not selected_prospects and session_id:
         logger.info(
-            "deployment_agent_node: no email-bearing prospects in state — attempting DB fallback | session=%s",
+            "deployment_agent_node: no contact-bearing prospects in state — attempting DB fallback | session=%s",
             session_id,
         )
         try:
@@ -408,21 +411,27 @@ async def deployment_agent_node(state: CampaignState) -> dict:
             if db_cards:
                 # Re-resolve from DB cards
                 db_by_id = {c["id"]: c for c in db_cards if c.get("id")}
-                # Merge email into existing state cards
+                # Merge contact methods into existing state cards
                 merged = []
                 for p in (all_prospects or db_cards):
                     pid = p.get("id")
                     db_p = db_by_id.get(pid, {})
                     email = p.get("email") or db_p.get("email")
-                    if email:
-                        merged.append({**p, **db_p, "email": email})
+                    linkedin = p.get("linkedin_url") or db_p.get("linkedin_url")
+                    if email or linkedin:
+                        new_p = {**p, **db_p}
+                        if email:
+                            new_p["email"] = email
+                        if linkedin:
+                            new_p["linkedin_url"] = linkedin
+                        merged.append(new_p)
                 # Re-apply selected_prospect_ids filter
                 if selected_prospect_ids:
                     merged = [p for p in merged if p.get("id") in selected_prospect_ids]
                 if merged:
                     selected_prospects = merged
                     logger.info(
-                        "deployment_agent_node: DB fallback resolved %d prospects with email | session=%s",
+                        "deployment_agent_node: DB fallback resolved %d prospects with contact methods | session=%s",
                         len(selected_prospects),
                         session_id,
                     )
@@ -453,8 +462,8 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     if not selected_prospects:
         logger.warning("deployment_agent_node: no prospects available | session=%s", session_id)
         error_text = (
-            "I couldn't find any prospects with email addresses to send to. "
-            "Please make sure your prospects have email addresses set, then try again."
+            "I couldn't find any prospects with email addresses or LinkedIn profiles to send to. "
+            "Please make sure your prospects have a communication method set, then try again."
         )
         return {
             "next_node": "orchestrator",
