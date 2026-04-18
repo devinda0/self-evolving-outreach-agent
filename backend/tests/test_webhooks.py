@@ -129,8 +129,6 @@ class TestResendInboundReplyDetection:
     async def test_inbound_reply_routed_to_inbound_pipeline(self):
         """A webhook payload with an unrecognised type and a from_email that
         differs from RESEND_FROM_EMAIL should be processed as an inbound reply."""
-        from unittest.mock import AsyncMock, patch
-
         from app.api.webhooks import _extract_inbound_reply
 
         # Simulate the payload Resend delivers for an inbound reply

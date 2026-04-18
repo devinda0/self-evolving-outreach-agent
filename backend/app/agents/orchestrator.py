@@ -768,6 +768,46 @@ def _format_variant_detail(variant: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _build_answer_variant_grid_frame(
+    variants: list[dict[str, Any]],
+    instance_id: str,
+) -> dict[str, Any]:
+    """Build a VariantGrid artifact for saved-content answers."""
+    return UIFrame(
+        type="ui_component",
+        component="VariantGrid",
+        instance_id=instance_id,
+        props={
+            "variants": variants,
+            "refinement_enabled": True,
+        },
+        actions=[
+            UIAction(
+                id=f"select-{variant.get('id', 'unknown')}",
+                label=f"Select: {variant.get('angle_label') or variant.get('intended_channel') or 'variant'}",
+                action_type="select_variant",
+                payload={"variant_id": variant.get("id")},
+            )
+            for variant in variants
+            if variant.get("id")
+        ]
+        + [
+            UIAction(
+                id="refine-content",
+                label="Refine content",
+                action_type="content_refine",
+                payload={},
+            ),
+            UIAction(
+                id="deploy-selected",
+                label="Deploy selected variants",
+                action_type="deploy_variants",
+                payload={},
+            ),
+        ],
+    ).model_dump()
+
+
 def _match_variants_from_question(
     question: str,
     variants: list[dict[str, Any]],
@@ -791,7 +831,7 @@ def _match_variants_from_question(
     return matches
 
 
-async def _try_answer_content_variant_question(state: CampaignState) -> str | None:
+async def _try_answer_content_variant_question(state: CampaignState) -> dict[str, Any] | None:
     """Answer direct content-variant questions without relying on the LLM."""
     question = _extract_last_user_message_content(state.get("messages", []))
     if not question:
@@ -824,13 +864,24 @@ async def _try_answer_content_variant_question(state: CampaignState) -> str | No
     )
 
     if len(matches) == 1 and wants_detail:
-        return _format_variant_detail(matches[0])
+        variant = matches[0]
+        label = variant.get("angle_label") or variant.get("id") or "saved"
+        return {
+            "text": f"Here is the {label} variant.",
+            "variants": matches,
+        }
 
     if len(matches) > 1:
-        return _format_variant_summary(matches)
+        return {
+            "text": f"I found {len(matches)} matching saved content variant(s).",
+            "variants": matches,
+        }
 
     if wants_listing:
-        return _format_variant_summary(variants)
+        return {
+            "text": _format_variant_summary(variants),
+            "variants": variants,
+        }
 
     return None
 
@@ -852,7 +903,22 @@ async def answer_node(state: CampaignState) -> dict[str, Any]:
 
     direct_variant_answer = await _try_answer_content_variant_question(state)
     if direct_variant_answer is not None:
-        answer_text = direct_variant_answer
+        intro_frame = UIFrame(
+            type="text",
+            component="MessageRenderer",
+            instance_id=f"answer_{uuid4().hex[:8]}",
+            props={"content": direct_variant_answer["text"], "role": "assistant"},
+            actions=[],
+        ).model_dump()
+        variant_grid_frame = _build_answer_variant_grid_frame(
+            direct_variant_answer["variants"],
+            f"answer-variant-grid-{session_id[:8]}",
+        )
+        return {
+            "active_stage_summary": "answered user question",
+            "session_complete": True,
+            "pending_ui_frames": [intro_frame, variant_grid_frame],
+        }
     else:
         bundle = await memory_manager.build_context_bundle(state, "orchestrator")
         context_messages = bundle.get("recent_messages", [])

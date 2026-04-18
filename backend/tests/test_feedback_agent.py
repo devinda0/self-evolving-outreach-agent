@@ -903,7 +903,7 @@ class TestFeedbackAgentNodeEnhanced:
             new_callable=AsyncMock,
             return_value=[{**reply_event, "reply_classification": mock_classification}],
         ):
-            result = await feedback_agent_node(state)
+            await feedback_agent_node(state)
 
         # Intelligence entry should contain reply insights
         mock_save_intel.assert_called_once()
@@ -948,7 +948,7 @@ class TestFeedbackAgentNodeEnhanced:
             normalized_feedback_events=events,
             deployment_records=records,
         )
-        result = await feedback_agent_node(state)
+        await feedback_agent_node(state)
 
         mock_save_intel.assert_called_once()
         saved = mock_save_intel.call_args[0][0]

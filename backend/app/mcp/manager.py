@@ -360,7 +360,11 @@ class MCPSSEServerProcess:
     async def _sse_reader(self, headers: dict[str, str]) -> None:
         """Background task: keeps the SSE stream open and dispatches responses."""
         try:
-            async with self._client.stream("GET", self._base_url, headers=headers) as resp:
+            client = self._client
+            if client is None:
+                raise RuntimeError("SSE client not initialized")
+
+            async with client.stream("GET", self._base_url, headers=headers) as resp:
                 resp.raise_for_status()
 
                 event_type: str | None = None

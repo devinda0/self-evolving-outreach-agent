@@ -265,7 +265,7 @@ def _get_llm(temperature: float = 0.4):
     return get_llm(temperature=temperature)
 
 
-def _parse_json_response(content: str) -> list[dict] | dict:
+def _parse_json_response(content: str) -> list[dict[str, Any]] | dict[str, Any]:
     """Strip optional markdown fences and parse JSON from LLM output."""
     content = content.strip()
     if content.startswith("```"):
@@ -408,6 +408,14 @@ def _get_selected_prospects(state: CampaignState) -> list[dict]:
     return []
 
 
+def _has_real_prospect_targets(prospects: list[dict] | None) -> bool:
+    """Return True when the target list includes actual recipients."""
+    if not prospects:
+        return False
+
+    return any(prospect.get("id") != _GENERALIZED_PROSPECT["id"] for prospect in prospects)
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: Clarification analysis
 # ---------------------------------------------------------------------------
@@ -502,7 +510,7 @@ async def generate_variants(
 
     # Determine variant count based on prospects and channels
     effective_prospects = prospects or []
-    if effective_prospects:
+    if _has_real_prospect_targets(effective_prospects):
         variant_count = min(len(effective_prospects), 5)
     else:
         variant_count = min(len(selected_channels) + 1, 3)
@@ -543,9 +551,8 @@ async def generate_variants(
     try:
         response = await llm.ainvoke(prompt)
         raw = str(response.content) if hasattr(response, "content") else str(response)
-        parsed: list[dict] = _parse_json_response(raw)
-        if not isinstance(parsed, list):
-            parsed = [parsed]
+        parsed_raw = _parse_json_response(raw)
+        parsed: list[dict[str, Any]] = parsed_raw if isinstance(parsed_raw, list) else [parsed_raw]
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("generate_variants: LLM parse failed (%s) — falling back to mock", exc)
         return _mock_variants(session_id, cycle_number, finding_ids, segment_id, prospects)
@@ -615,9 +622,8 @@ async def refine_variants(
     try:
         response = await llm.ainvoke(prompt)
         raw = str(response.content) if hasattr(response, "content") else str(response)
-        parsed: list[dict] = _parse_json_response(raw)
-        if not isinstance(parsed, list):
-            parsed = [parsed]
+        parsed_raw = _parse_json_response(raw)
+        parsed: list[dict[str, Any]] = parsed_raw if isinstance(parsed_raw, list) else [parsed_raw]
     except Exception as exc:
         logger.warning("refine_variants: LLM failed (%s) — returning originals", exc)
         now = datetime.now(timezone.utc)
@@ -715,14 +721,15 @@ def _mock_variants(
     now = datetime.now(timezone.utc)
     ref_ids = finding_ids[:2] if finding_ids else ["finding-mock-1"]
     variants: list[ContentVariant] = []
+    effective_prospects = prospects or []
 
-    if prospects:
+    if _has_real_prospect_targets(effective_prospects):
         angles = [
             ("pain-led", "email", "reply_rate > 8%"),
             ("roi-first", "email", "reply_rate > 6%"),
             ("social-proof", "linkedin", "acceptance_rate > 30%"),
         ]
-        for i, prospect in enumerate(prospects[:3]):
+        for i, prospect in enumerate(effective_prospects[:3]):
             angle_label, channel, metric = angles[i % len(angles)]
             name = prospect.get("name", "there")
             first_name = name.split()[0] if name else "there"
@@ -886,7 +893,7 @@ def build_clarification_frame(
     questions: list[dict], confidence_score: float, instance_id: str
 ) -> dict[str, Any]:
     """Build a ContentClarification UI frame for the WebSocket stream."""
-    actions = []
+    actions: list[UIAction] = []
     for q in questions:
         q_id = q.get("id", f"q{len(actions)}")
         for opt in q.get("suggested_options", []):
@@ -1435,4 +1442,7 @@ async def content_agent_node(state: CampaignState) -> dict:
                 phase,
             )
             return await content_generate_node(state)
-        return await content_clarify_node(state)
+        clarify_result = await content_clarify_node(state)
+        if clarify_result.get("content_phase") == "generate":
+            return await content_generate_node({**state, **clarify_result})
+        return clarify_result

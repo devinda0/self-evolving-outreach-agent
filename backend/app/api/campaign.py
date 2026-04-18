@@ -713,9 +713,9 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                     if response_text:
                         clarifications = _parse_clarification_response(response_text)
                         graph = _get_or_init_graph()
-                        cfg: RunnableConfig = {"configurable": {"thread_id": session_id}}
+                        clarify_cfg: RunnableConfig = {"configurable": {"thread_id": session_id}}
                         try:
-                            await graph.aupdate_state(cfg, {
+                            await graph.aupdate_state(clarify_cfg, {
                                 "content_phase": "generate",
                                 "content_clarifications": clarifications,
                                 "content_pending_questions": [],
@@ -793,9 +793,9 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                     pre_delta = _state_delta_before_rerun(action_id, payload)
                     if pre_delta:
                         graph = _get_or_init_graph()
-                        cfg: RunnableConfig = {"configurable": {"thread_id": session_id}}
+                        rerun_cfg: RunnableConfig = {"configurable": {"thread_id": session_id}}
                         try:
-                            await graph.aupdate_state(cfg, pre_delta)  # type: ignore[arg-type]
+                            await graph.aupdate_state(rerun_cfg, pre_delta)  # type: ignore[arg-type]
                         except Exception:
                             logger.warning(
                                 "Could not pre-patch state for '%s'", action_id, exc_info=True

@@ -34,7 +34,29 @@ logger = logging.getLogger(__name__)
 # Demo seed list — used when no prospect source is provided
 # ---------------------------------------------------------------------------
 
-DEMO_SEED_PROSPECTS: list[dict[str, Any]] = []
+DEMO_SEED_PROSPECTS: list[dict[str, Any]] = [
+    {
+        "name": "Alice Chen",
+        "email": "alice.chen@northstar.ai",
+        "linkedin_url": "https://www.linkedin.com/in/alice-chen",
+        "title": "VP Growth",
+        "company": "Northstar AI",
+    },
+    {
+        "name": "Marcus Rivera",
+        "email": "marcus@signalforge.com",
+        "linkedin_url": "https://www.linkedin.com/in/marcus-rivera",
+        "title": "Head of Revenue Operations",
+        "company": "SignalForge",
+    },
+    {
+        "name": "Priya Nair",
+        "email": None,
+        "linkedin_url": "https://www.linkedin.com/in/priya-nair-b2b",
+        "title": "Director of Demand Generation",
+        "company": "CloudHarbor",
+    },
+]
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +96,14 @@ async def load_prospects(
                 num_prospects=10,
             )
             if discovered:
-                logger.info("Discovered %d prospects via research", len(discovered))
-                # Filter out prospects without a communication method
-                return [p for p in discovered if p.get("email") or p.get("linkedin_url")]
+                contactable = [p for p in discovered if p.get("email") or p.get("linkedin_url")]
+                if not contactable:
+                    logger.info(
+                        "Research discovery returned no contactable prospects; falling back to demo seed"
+                    )
+                else:
+                    logger.info("Discovered %d prospects via research", len(contactable))
+                    return contactable
         except Exception as exc:
             logger.warning("Prospect discovery failed (%s) — falling back to seed list", exc)
 
@@ -378,17 +405,12 @@ async def score_prospects(
 
 
 def build_prospect_card(prospect: dict[str, Any]) -> dict[str, Any]:
-    """Build a compact prospect card for the ProspectPicker UI.
-
-    Includes email and linkedin_url so the deployment agent can send messages.
-    """
+    """Build a compact prospect card for the ProspectPicker UI."""
     return {
         "id": prospect["id"],
         "name": prospect["name"],
         "title": prospect.get("title", ""),
         "company": prospect.get("company", ""),
-        "email": prospect.get("email"),
-        "linkedin_url": prospect.get("linkedin_url"),
         "fit_score": prospect["fit_score"],
         "urgency_score": prospect["urgency_score"],
         "angle_recommendation": prospect["angle_recommendation"],

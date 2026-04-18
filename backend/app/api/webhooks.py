@@ -25,7 +25,6 @@ from app.db.crud import (
     save_feedback_event,
     save_quarantine_event,
     update_dlq_event,
-    update_feedback_event,
     upsert_email_thread,
 )
 
@@ -621,7 +620,7 @@ async def _update_thread_with_reply(
     from app.db.crud import get_email_thread_by_prospect
     thread = await get_email_thread_by_prospect(session_id, prospect_id)
 
-    inbound_message = {
+    inbound_message: dict[str, Any] = {
         "message_id": message_id,
         "direction": "inbound",
         "subject": reply_info.get("subject"),

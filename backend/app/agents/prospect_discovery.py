@@ -15,7 +15,7 @@ import re
 from typing import Any
 
 from app.core.llm import get_llm
-from app.tools.mcp_tools import do_search
+from app.tools.mcp_tools import do_search as search_web
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ Product: {product_name}
 Extract real prospect profiles from these search results. Only include people who appear to be
 real individuals with verifiable information. Do not fabricate details.
 
-CRITICAL REQUIREMENT: 
+CRITICAL REQUIREMENT:
 You MUST successfully extract either a valid email address or a valid LinkedIn profile URL for each prospect.
 If a prospect does not have an email OR a LinkedIn URL available in the search results, DO NOT include them in the results.
 Prospects without a communication method are useless for outreach.
@@ -216,7 +216,7 @@ async def _search_based_discovery(
     # Execute searches
     all_results: list[dict] = []
     for query in queries:
-        results = await do_search(query, max_results=5, recency_days=90)
+        results = await search_web(query, max_results=5, recency_days=90)
         all_results.extend(results)
 
     if not all_results:

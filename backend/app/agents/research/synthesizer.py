@@ -114,6 +114,7 @@ def _mock_briefing(findings: list[dict], user_directive: str | None = None) -> d
             "The market shows significant dynamic behavior requiring nuanced outreach strategies. "
             "We have uncovered overlapping needs that require a localized value proposition."
         ),
+        "key_themes": thread_types,
         "content_angles": [f"Angle based on {t} analysis" for t in thread_types],
         "top_opportunities": [f.get("actionable_implication", "") for f in findings[:3]],
         "gaps": [
@@ -203,7 +204,7 @@ async def research_synthesizer_node(state: CampaignState) -> dict:
         cycle_number=state.get("cycle_number", 1),
         user_directive=user_directive,
     )
-    
+
     # Inject top findings globally into the briefing so the frontend can display them
     briefing["top_findings"] = deduplicated[:10]
 

@@ -13,6 +13,12 @@ from app.core.llm import get_llm
 
 logger = logging.getLogger(__name__)
 
+
+def _llm_response_to_text(response: Any) -> str:
+    """Normalize LangChain response content into plain text."""
+    raw_content = response.content if hasattr(response, "content") else response
+    return raw_content if isinstance(raw_content, str) else str(raw_content)
+
 # ---------------------------------------------------------------------------
 # Classification taxonomy
 # ---------------------------------------------------------------------------
@@ -138,7 +144,7 @@ async def classify_reply(
 
     try:
         response = await llm.ainvoke(prompt)
-        content = response.content if hasattr(response, "content") else str(response)
+        content = _llm_response_to_text(response)
 
         # Strip markdown fences if present
         content = content.strip()

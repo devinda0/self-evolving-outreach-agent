@@ -575,9 +575,16 @@ class TestAnswerNode:
         ):
             result = await answer_node(state)
 
-        content = result["pending_ui_frames"][0]["props"]["content"]
-        assert "pain-point" in content
-        assert "social-proof" in content
+        frames = result["pending_ui_frames"]
+        assert len(frames) == 2
+        assert frames[0]["type"] == "text"
+        assert frames[1]["component"] == "VariantGrid"
+        grid_variants = frames[1]["props"]["variants"]
+        assert len(grid_variants) == 2
+        assert {variant["angle_label"] for variant in grid_variants} == {
+            "pain-point",
+            "social-proof",
+        }
 
     async def test_variant_detail_returns_saved_body(self):
         """Direct display requests should return the saved variant content."""
@@ -606,10 +613,15 @@ class TestAnswerNode:
         ):
             result = await answer_node(state)
 
-        content = result["pending_ui_frames"][0]["props"]["content"]
-        assert "saved pain-point body" in content
-        assert "Cut onboarding friction" in content
-        assert "Open to a quick review?" in content
+        frames = result["pending_ui_frames"]
+        assert len(frames) == 2
+        assert frames[0]["props"]["content"] == "Here is the pain-point variant."
+        assert frames[1]["component"] == "VariantGrid"
+        grid_variants = frames[1]["props"]["variants"]
+        assert len(grid_variants) == 1
+        assert grid_variants[0]["body"] == "Here is the saved pain-point body."
+        assert grid_variants[0]["subject_line"] == "Cut onboarding friction"
+        assert grid_variants[0]["cta"] == "Open to a quick review?"
 
     async def test_instance_id_prefix(self):
         """Answer node generates instance_id with answer_ prefix."""

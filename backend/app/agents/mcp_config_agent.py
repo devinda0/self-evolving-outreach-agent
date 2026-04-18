@@ -58,6 +58,12 @@ _KNOWN_PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+def _llm_response_to_text(response: Any) -> str:
+    """Normalize LangChain response content into plain text."""
+    raw_content = response.content if hasattr(response, "content") else response
+    return raw_content if isinstance(raw_content, str) else str(raw_content)
+
 MCP_CONFIG_SYSTEM_PROMPT = """You are an MCP server configuration assistant for the Signal to Action system.
 
 Your job: extract MCP server configuration details from the user's message.
@@ -135,8 +141,7 @@ async def mcp_config_node(state: CampaignState) -> dict[str, Any]:
     session_id = state.get("session_id", "unknown")
     logger.info("mcp_config_node called | session=%s", session_id)
 
-    bundle = await memory_manager.build_context_bundle(state, "orchestrator")
-    context_messages = bundle.get("recent_messages", [])
+    await memory_manager.build_context_bundle(state, "orchestrator")
 
     # Get the latest user message
     messages = state.get("messages", [])
@@ -175,7 +180,7 @@ async def mcp_config_node(state: CampaignState) -> dict[str, Any]:
             ]
         )
 
-        content = response.content.strip()
+        content = _llm_response_to_text(response).strip()
         # Handle markdown code blocks
         if content.startswith("```"):
             first_nl = content.find("\n")
@@ -224,7 +229,7 @@ async def _configure_from_url(url: str, user_message: str) -> dict[str, Any]:
     description = provider["description"] if provider else "Custom MCP server"
     transport = provider["transport"] if provider else MCPTransport.SSE
 
-    config_dict = {
+    config_dict: dict[str, Any] = {
         "name": name,
         "description": description,
         "transport": transport.value if isinstance(transport, MCPTransport) else transport,

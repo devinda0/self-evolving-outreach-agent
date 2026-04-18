@@ -1,18 +1,15 @@
 """Tests for the cycle manager — refined_cycle_node, CycleRecord building, accumulated learnings."""
 
-import pytest
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+
+import pytest
 
 from app.agents.cycle_manager import (
-    _build_approach_outcomes,
     _build_accumulated_learnings,
+    _build_approach_outcomes,
     _build_cycle_record,
     refined_cycle_node,
 )
-from app.models.intelligence import ApproachOutcome, CycleRecord
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,14 +128,14 @@ class TestApproachOutcomes:
         assert len(outcomes) == 2
 
         # var-A has 40% reply rate → effective
-        var_a = next(o for o in outcomes if o["variant_id"] == "var-A")
-        assert var_a["verdict"] == "effective"
-        assert var_a["engagement_rate"] == 0.4
+        var_a = next(o for o in outcomes if o.variant_id == "var-A")
+        assert var_a.verdict == "effective"
+        assert var_a.engagement_rate == 0.4
 
         # var-B has 0% reply rate → ineffective
-        var_b = next(o for o in outcomes if o["variant_id"] == "var-B")
-        assert var_b["verdict"] == "ineffective"
-        assert var_b["engagement_rate"] == 0.0
+        var_b = next(o for o in outcomes if o.variant_id == "var-B")
+        assert var_b.verdict == "ineffective"
+        assert var_b.engagement_rate == 0.0
 
     def test_empty_engagement_results(self):
         state = _make_state(engagement_results=[])
@@ -160,7 +157,7 @@ class TestApproachOutcomes:
             ]
         )
         outcomes = _build_approach_outcomes(state)
-        assert outcomes[0]["verdict"] == "insufficient_data"
+        assert outcomes[0].verdict == "insufficient_data"
 
 
 # ---------------------------------------------------------------------------

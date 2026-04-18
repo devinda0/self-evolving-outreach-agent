@@ -10,12 +10,11 @@ When a user says "proceed to cycle 2" or "start next cycle", this node:
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from app.core.llm import get_llm
 from app.db.crud import get_cycle_records, get_intelligence_entries, save_cycle_record
-from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import ApproachOutcome, CycleRecord
 from app.models.ui_frames import UIAction, UIFrame
@@ -28,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _build_approach_outcomes(state: CampaignState) -> list[dict]:
+def _build_approach_outcomes(state: CampaignState) -> list[ApproachOutcome]:
     """Analyze engagement results to determine which approaches worked or failed."""
     results = state.get("engagement_results", [])
     variants = state.get("content_variants", [])
@@ -36,13 +35,14 @@ def _build_approach_outcomes(state: CampaignState) -> list[dict]:
     # Build variant_id → variant metadata lookup
     variant_map = {v.get("id"): v for v in variants if isinstance(v, dict)}
 
-    outcomes: list[dict] = []
+    outcomes: list[ApproachOutcome] = []
     for result in results:
         v_id = result.get("variant_id")
         variant = variant_map.get(v_id, {})
         sent = result.get("sent", 0)
         reply_rate = result.get("reply_rate", 0.0)
 
+        verdict: Literal["effective", "ineffective", "insufficient_data"]
         if sent < 1:
             verdict = "insufficient_data"
         elif reply_rate >= 0.05:
@@ -63,7 +63,7 @@ def _build_approach_outcomes(state: CampaignState) -> list[dict]:
                 engagement_rate=reply_rate,
                 sample_size=sent,
                 verdict=verdict,
-            ).model_dump()
+            )
         )
     return outcomes
 
@@ -110,10 +110,10 @@ def _build_cycle_record(state: CampaignState) -> CycleRecord:
 
     # Determine what to avoid / amplify
     approaches_to_avoid = [
-        o["approach"] for o in approach_outcomes if o["verdict"] == "ineffective"
+        o.approach for o in approach_outcomes if o.verdict == "ineffective"
     ]
     approaches_to_amplify = [
-        o["approach"] for o in approach_outcomes if o["verdict"] == "effective"
+        o.approach for o in approach_outcomes if o.verdict == "effective"
     ]
 
     # Key decisions from decision log
@@ -142,7 +142,7 @@ def _build_cycle_record(state: CampaignState) -> CycleRecord:
         total_bounces=total_bounces,
         winning_variant_id=state.get("winning_variant_id"),
         winning_strategy=next(
-            (o["approach"] for o in approach_outcomes if o["verdict"] == "effective"),
+            (o.approach for o in approach_outcomes if o.verdict == "effective"),
             None,
         ),
         approach_outcomes=approach_outcomes,
@@ -228,13 +228,13 @@ async def _build_accumulated_learnings(
 
     if all_effective:
         unique_effective = list(dict.fromkeys(all_effective))  # preserve order, dedupe
-        lines.append(f"AMPLIFY these approaches (they generated engagement):")
+        lines.append("AMPLIFY these approaches (they generated engagement):")
         for approach in unique_effective[:5]:
             lines.append(f"  + {approach}")
 
     if all_ineffective:
         unique_ineffective = list(dict.fromkeys(all_ineffective))
-        lines.append(f"AVOID these approaches (they generated NO engagement):")
+        lines.append("AVOID these approaches (they generated NO engagement):")
         for approach in unique_ineffective[:5]:
             lines.append(f"  - {approach}")
 

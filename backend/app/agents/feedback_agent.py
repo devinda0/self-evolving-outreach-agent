@@ -24,7 +24,6 @@ from app.db.crud import (
     get_deployment_records_for_session,
     get_email_threads_for_session,
     get_feedback_events_for_session,
-    get_reply_events_for_session,
     save_intelligence_entry,
     save_quarantine_event,
     update_feedback_event,

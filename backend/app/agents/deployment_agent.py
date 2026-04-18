@@ -12,7 +12,6 @@ Handles:
 import asyncio
 import hashlib
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
@@ -57,32 +56,6 @@ def build_ab_split_plan(variants: list[dict], prospects: list[dict]) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Content personalisation
-# ---------------------------------------------------------------------------
-
-
-_LEADING_GREETING_RE = re.compile(
-    r"^\s*(Hi|Hello|Hey|Dear)\s+[^\n,]{0,60}[,]?\s*\n+",
-    re.IGNORECASE,
-)
-
-_LEADING_GREETING_HTML_RE = re.compile(
-    r"^\s*<p>\s*(Hi|Hello|Hey|Dear)\s+[^<]{0,60}[,]?\s*</p>\s*",
-    re.IGNORECASE,
-)
-
-
-def _strip_leading_greeting(text: str) -> str:
-    """Remove an opening 'Hi name,' line so we don't double-greet."""
-    return _LEADING_GREETING_RE.sub("", text).strip()
-
-
-def _strip_leading_greeting_html(html: str) -> str:
-    """Remove an opening <p>Hi name,</p> block from HTML content."""
-    return _LEADING_GREETING_HTML_RE.sub("", html).strip()
-
-
 def _apply_tokens(text: str, prospect: dict) -> str:
     """Replace {{first_name}} and {{company}} tokens in any string."""
     name = prospect.get("name", "")
@@ -93,57 +66,25 @@ def _apply_tokens(text: str, prospect: dict) -> str:
     return text
 
 
-def _get_signature() -> str:
-    """Return the configured email signature string."""
-    sig = getattr(settings, "EMAIL_SIGNATURE", None)
-    return sig if sig else "The Team"
-
-
 def personalize_variant(variant: dict, prospect: dict) -> str:
-    """Return a plain-text email body with greeting and signature.
-
-    Strips any greeting the LLM may have included to avoid doubling it.
-    """
-    raw_body = variant.get("body", "")
-    body = _apply_tokens(raw_body, prospect)
-    body = _strip_leading_greeting(body)
-    name = prospect.get("name") or "there"
-    greeting = f"Hi {name},\n\n"
-    signature = f"\n\nBest regards,\n{_get_signature()}"
-    return f"{greeting}{body}{signature}"
+    """Return a plain-text body with prospect tokens substituted."""
+    raw_body = variant.get("body") or ""
+    return _apply_tokens(raw_body, prospect)
 
 
 def personalize_variant_html(variant: dict, prospect: dict) -> str:
-    """Return a personalised HTML body for email sending, with greeting and signature.
+    """Return a personalised HTML body for email sending.
 
-    Uses ``html_body`` if present on the variant; falls back to ``body``.
-    Plain-text bodies are converted to basic HTML by replacing newlines
-    with ``<br>`` tags. Always includes greeting and signature. Strips any
-    greeting already written into the body to prevent doubling.
+    Uses ``html_body`` if present on the variant; otherwise wraps the plain-text
+    body in a paragraph and converts newlines to ``<br>``.
     """
-    raw = variant.get("html_body") or variant.get("body", "")
-    content = _apply_tokens(raw, prospect)
-    name = prospect.get("name") or "there"
-    greeting = f"<p>Hi {name},</p>"
-    # If there are no HTML tags, convert plain text → HTML, stripping inline greeting
-    if "<" not in content:
-        content = _strip_leading_greeting(content)
-        lines = content.replace("\r\n", "\n").split("\n")
-        paragraphs = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped:
-                paragraphs.append(f"<p>{stripped}</p>")
-        content = "\n".join(paragraphs) if paragraphs else "<p></p>"
-    else:
-        content = _strip_leading_greeting_html(content)
-    signature = (
-        f"<br>"
-        f"<p style='color:#555;font-size:14px;'>"
-        f"Best regards,<br><strong>{_get_signature()}</strong>"
-        f"</p>"
-    )
-    return f"{greeting}\n{content}\n{signature}"
+    raw_html = variant.get("html_body")
+    if raw_html:
+        return _apply_tokens(raw_html, prospect)
+
+    raw_body = variant.get("body") or ""
+    plain_text = _apply_tokens(raw_body, prospect).replace("\r\n", "\n")
+    return f"<p>{plain_text.replace(chr(10), '<br>')}</p>"
 
 
 # ---------------------------------------------------------------------------
@@ -397,11 +338,14 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     if not selected_prospects:
         selected_prospects = all_prospects
     # Filter out prospects without external contact methods
-    selected_prospects = [p for p in selected_prospects if p.get("email") or p.get("linkedin_url")]
+    if not settings.USE_MOCK_SEND:
+        selected_prospects = [
+            p for p in selected_prospects if p.get("email") or p.get("linkedin_url")
+        ]
 
     # DB fallback: for older sessions where prospect_cards were saved without contact methods,
     # reload from DB and merge the fields in.
-    if not selected_prospects and session_id:
+    if not selected_prospects and session_id and not settings.USE_MOCK_SEND:
         logger.info(
             "deployment_agent_node: no contact-bearing prospects in state — attempting DB fallback | session=%s",
             session_id,
@@ -567,10 +511,6 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     ab_plan = state.get("ab_split_plan") or build_ab_split_plan(
         selected_variants, selected_prospects
     )
-    # If more than one prospect, use only the first variant and treat as generalized
-    if len(selected_prospects) > 1 and len(selected_variants) > 1:
-        selected_variants = selected_variants[:1]
-        ab_plan = build_ab_split_plan(selected_variants, selected_prospects)
     segment_id = state.get("selected_segment_id") or "seg-unknown"
 
     deployment_records: list[dict] = []
