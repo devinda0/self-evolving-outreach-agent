@@ -540,6 +540,77 @@ class TestAnswerNode:
         assert len(frames) == 1
         assert "error" in frames[0]["props"]["content"].lower()
 
+    async def test_variant_listing_uses_persisted_variants_when_state_is_empty(self):
+        """Variant inventory questions should work from persisted variants."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "what are the content currently have?"}],
+        )
+
+        variants = [
+            {
+                "id": "var-1",
+                "angle_label": "pain-point",
+                "intended_channel": "email",
+                "subject_line": "Cut onboarding friction",
+                "body": "Pain-point body",
+                "cta": "Open to a quick review?",
+                "success_metric": "reply_rate > 5%",
+            },
+            {
+                "id": "var-2",
+                "angle_label": "social-proof",
+                "intended_channel": "linkedin",
+                "body": "Social-proof body",
+                "cta": "Worth a look?",
+                "success_metric": "acceptance_rate > 30%",
+            },
+        ]
+
+        with (
+            patch("app.agents.orchestrator._get_llm", return_value=None),
+            patch(
+                "app.agents.orchestrator.get_latest_variants_for_session",
+                new=AsyncMock(return_value=variants),
+            ),
+        ):
+            result = await answer_node(state)
+
+        content = result["pending_ui_frames"][0]["props"]["content"]
+        assert "pain-point" in content
+        assert "social-proof" in content
+
+    async def test_variant_detail_returns_saved_body(self):
+        """Direct display requests should return the saved variant content."""
+        state = _make_state(
+            messages=[{"role": "user", "content": "can you display pain-point content?"}],
+        )
+
+        variants = [
+            {
+                "id": "var-1",
+                "angle_label": "pain-point",
+                "intended_channel": "email",
+                "subject_line": "Cut onboarding friction",
+                "body": "Here is the saved pain-point body.",
+                "cta": "Open to a quick review?",
+                "success_metric": "reply_rate > 5%",
+            },
+        ]
+
+        with (
+            patch("app.agents.orchestrator._get_llm", return_value=None),
+            patch(
+                "app.agents.orchestrator.get_latest_variants_for_session",
+                new=AsyncMock(return_value=variants),
+            ),
+        ):
+            result = await answer_node(state)
+
+        content = result["pending_ui_frames"][0]["props"]["content"]
+        assert "saved pain-point body" in content
+        assert "Cut onboarding friction" in content
+        assert "Open to a quick review?" in content
+
     async def test_instance_id_prefix(self):
         """Answer node generates instance_id with answer_ prefix."""
         state = _make_state()

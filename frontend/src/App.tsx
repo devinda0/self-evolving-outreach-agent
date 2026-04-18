@@ -19,6 +19,11 @@ interface CampaignSummary {
   updated_at: string | null;
 }
 
+interface RestoredCampaignState {
+  content_variants?: Array<Record<string, unknown>>;
+  cycle_number?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Campaign History Panel
 // ---------------------------------------------------------------------------
@@ -463,6 +468,7 @@ function ChatThread() {
   const currentStage = useCampaignStore((s) => s.currentStage);
   const isStreaming = useCampaignStore((s) => s.isStreaming);
   const isWaitingForResponse = useCampaignStore((s) => s.isWaitingForResponse);
+  const hydrateMessages = useCampaignStore((s) => s.hydrateMessages);
   const resetSession = useCampaignStore((s) => s.resetSession);
 
   const { sendMessage, sendUIAction } = useWebSocket(sessionId);
@@ -474,6 +480,52 @@ function ChatThread() {
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreCampaignPreview() {
+      if (!sessionId || messages.length > 0) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/campaign/${sessionId}/state`);
+        if (!res.ok) return;
+
+        const state = (await res.json()) as RestoredCampaignState;
+        const variants = Array.isArray(state.content_variants) ? state.content_variants : [];
+        if (!variants.length || cancelled) return;
+
+        hydrateMessages([
+          {
+            id: `restore-text-${sessionId}`,
+            role: "assistant",
+            content: `Restored ${variants.length} saved content variant(s) from cycle ${state.cycle_number ?? 1}.`,
+            timestamp: new Date(),
+          },
+          {
+            id: `restore-grid-${sessionId}`,
+            role: "assistant",
+            content: "",
+            uiComponent: {
+              type: "ui_component",
+              component: "VariantGrid",
+              instance_id: `restored-variants-${sessionId.slice(0, 8)}`,
+              props: { variants },
+              actions: [],
+            },
+            timestamp: new Date(),
+          },
+        ]);
+      } catch {
+        // Silent fallback — live chat still works without preload.
+      }
+    }
+
+    void restoreCampaignPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateMessages, messages.length, sessionId]);
 
   function handleAction(instanceId: string, actionId: string, payload: Record<string, unknown>) {
     // Clarification responses → send as a regular user message

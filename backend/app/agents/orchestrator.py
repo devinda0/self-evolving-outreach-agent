@@ -17,10 +17,12 @@ Intent modes:
 
 import json
 import logging
+import re
 from typing import Any
 from uuid import uuid4
 
 from app.core.llm import get_llm
+from app.db.crud import get_latest_variants_for_session
 from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.ui_frames import UIAction, UIFrame
@@ -538,13 +540,34 @@ async def _build_answer_context(state: CampaignState) -> str:
     if briefing:
         context_parts.append(f"\nBriefing Summary: {briefing}")
 
-    # Include content variants if available
+    # Include content variants if available (fall back to persisted variants when
+    # the active graph state does not currently hold them).
     variants = state.get("content_variants", [])
+    if not variants:
+        try:
+            variants = await get_latest_variants_for_session(session_id)
+        except Exception:
+            logger.warning("_build_answer_context: could not load persisted variants", exc_info=True)
+
     if variants:
         context_parts.append(f"\nContent Variants ({len(variants)} total):")
         for v in variants[:5]:
-            label = v.get("angle_label", "unknown") if isinstance(v, dict) else str(v)
-            context_parts.append(f"  - {label}")
+            if not isinstance(v, dict):
+                context_parts.append(f"  - {v}")
+                continue
+            label = v.get("angle_label") or v.get("id") or "unknown"
+            channel = v.get("intended_channel", "unknown")
+            context_parts.append(
+                f"  - {label} | id: {v.get('id', 'unknown')} | channel: {channel}"
+            )
+            if v.get("subject_line"):
+                context_parts.append(f"    Subject: {v['subject_line']}")
+            if v.get("body"):
+                context_parts.append(f"    Body: {v['body'][:1200]}")
+            if v.get("cta"):
+                context_parts.append(f"    CTA: {v['cta']}")
+            if v.get("hypothesis"):
+                context_parts.append(f"    Hypothesis: {v['hypothesis']}")
 
     # --- Live DB data (resilient to DB unavailability) ---
     db_records: list[dict] = []
@@ -676,6 +699,142 @@ async def _build_answer_context(state: CampaignState) -> str:
     return "\n".join(context_parts)
 
 
+def _extract_last_user_message_content(messages: list[Any]) -> str:
+    """Return the latest user-authored message content."""
+    for msg in reversed(messages or []):
+        if hasattr(msg, "type") and hasattr(msg, "content"):
+            if getattr(msg, "type", "") == "human":
+                content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                return content.strip()
+            continue
+
+        role = msg.get("role", "")
+        if role == "user":
+            return str(msg.get("content", "")).strip()
+
+    return ""
+
+
+def _normalize_variant_text(value: str) -> str:
+    """Normalize text for loose matching against variant labels or IDs."""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+async def _get_answer_variants(state: CampaignState) -> list[dict[str, Any]]:
+    """Load the active content variants from state or persistent storage."""
+    variants = state.get("content_variants", [])
+    if variants:
+        return variants
+
+    try:
+        return await get_latest_variants_for_session(state.get("session_id", ""))
+    except Exception:
+        logger.warning("_get_answer_variants: could not load persisted variants", exc_info=True)
+        return []
+
+
+def _format_variant_summary(variants: list[dict[str, Any]]) -> str:
+    """Format a compact list of available content variants."""
+    lines = [f"The campaign currently has {len(variants)} saved content variant(s):", ""]
+    for variant in variants:
+        label = variant.get("angle_label") or variant.get("id") or "unnamed"
+        channel = variant.get("intended_channel", "unknown")
+        subject = variant.get("subject_line")
+        line = f"- {label} ({channel})"
+        if subject:
+            line += f" | subject: {subject}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _format_variant_detail(variant: dict[str, Any]) -> str:
+    """Format a full variant for direct display in chat."""
+    label = variant.get("angle_label") or variant.get("id") or "saved"
+    channel = variant.get("intended_channel", "unknown")
+    parts = [f"Here is the {label} variant:", ""]
+    parts.append(f"Channel: {channel}")
+    if variant.get("subject_line"):
+        parts.append(f"Subject: {variant['subject_line']}")
+    if variant.get("hypothesis"):
+        parts.append(f"Hypothesis: {variant['hypothesis']}")
+    parts.append("")
+    parts.append("Body:")
+    parts.append(variant.get("body", "(no body saved)"))
+    if variant.get("cta"):
+        parts.append("")
+        parts.append(f"CTA: {variant['cta']}")
+    if variant.get("success_metric"):
+        parts.append(f"Success metric: {variant['success_metric']}")
+    return "\n".join(parts)
+
+
+def _match_variants_from_question(
+    question: str,
+    variants: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Find variants referenced in a user question by label, ID, or subject."""
+    normalized_question = _normalize_variant_text(question)
+    matches: list[dict[str, Any]] = []
+
+    for variant in variants:
+        aliases = [
+            str(variant.get("id", "")),
+            str(variant.get("angle_label", "")),
+            str(variant.get("subject_line", "")),
+        ]
+        normalized_aliases = {
+            _normalize_variant_text(alias) for alias in aliases if alias.strip()
+        }
+        if any(alias and alias in normalized_question for alias in normalized_aliases):
+            matches.append(variant)
+
+    return matches
+
+
+async def _try_answer_content_variant_question(state: CampaignState) -> str | None:
+    """Answer direct content-variant questions without relying on the LLM."""
+    question = _extract_last_user_message_content(state.get("messages", []))
+    if not question:
+        return None
+
+    lowered = question.lower()
+    if not any(token in lowered for token in ("content", "variant", "angle", "subject")):
+        return None
+
+    variants = await _get_answer_variants(state)
+    if not variants:
+        return None
+
+    matches = _match_variants_from_question(question, variants)
+    wants_listing = any(
+        token in lowered
+        for token in (
+            "what are",
+            "what is",
+            "which",
+            "list",
+            "available",
+            "currently have",
+            "how many",
+        )
+    )
+    wants_detail = any(
+        token in lowered
+        for token in ("show", "display", "read", "open", "detail", "full", "content")
+    )
+
+    if len(matches) == 1 and wants_detail:
+        return _format_variant_detail(matches[0])
+
+    if len(matches) > 1:
+        return _format_variant_summary(matches)
+
+    if wants_listing:
+        return _format_variant_summary(variants)
+
+    return None
+
+
 async def answer_node(state: CampaignState) -> dict[str, Any]:
     """Answer a user question directly from campaign context and live DB data.
 
@@ -691,20 +850,24 @@ async def answer_node(state: CampaignState) -> dict[str, Any]:
     session_id = state.get("session_id", "unknown")
     logger.info("answer_node called | session=%s", session_id)
 
-    bundle = await memory_manager.build_context_bundle(state, "orchestrator")
-    context_messages = bundle.get("recent_messages", [])
-
-    # Build rich context including live DB data
-    context_str = await _build_answer_context(state)
-
-    llm = _get_llm()
-
-    if llm is None:
-        # Mock mode
-        answer_text = "I don't have enough context to answer that question in mock mode."
+    direct_variant_answer = await _try_answer_content_variant_question(state)
+    if direct_variant_answer is not None:
+        answer_text = direct_variant_answer
     else:
-        try:
-            prompt = f"""Campaign context:
+        bundle = await memory_manager.build_context_bundle(state, "orchestrator")
+        context_messages = bundle.get("recent_messages", [])
+
+        # Build rich context including live DB data
+        context_str = await _build_answer_context(state)
+
+        llm = _get_llm()
+
+        if llm is None:
+            # Mock mode
+            answer_text = "I don't have enough context to answer that question in mock mode."
+        else:
+            try:
+                prompt = f"""Campaign context:
 {context_str}
 
 Conversation history:
@@ -712,16 +875,16 @@ Conversation history:
 
 Answer the user's latest question based on the above context."""
 
-            response = await llm.ainvoke(
-                [
-                    {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ]
-            )
-            answer_text = response.content
-        except Exception as e:
-            logger.error("answer_node LLM error | session=%s error=%s", session_id, e)
-            answer_text = "I'm sorry, I encountered an error trying to answer your question. Could you try rephrasing it?"
+                response = await llm.ainvoke(
+                    [
+                        {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ]
+                )
+                answer_text = response.content
+            except Exception as e:
+                logger.error("answer_node LLM error | session=%s error=%s", session_id, e)
+                answer_text = "I'm sorry, I encountered an error trying to answer your question. Could you try rephrasing it?"
 
     instance_id = f"answer_{uuid4().hex[:8]}"
     ui_frame = UIFrame(

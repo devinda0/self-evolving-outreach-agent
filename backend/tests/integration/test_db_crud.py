@@ -4,6 +4,8 @@ These tests require a running MongoDB instance (local Docker or Atlas).
 Run with: pytest -m integration
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from app.db.client import close_db, connect_db, get_db
@@ -12,6 +14,7 @@ from app.db.crud import (
     create_indexes,
     get_cached_tool_result,
     get_deployment_by_provider_message_id,
+    get_latest_variants_for_session,
     get_top_findings,
     get_variants_for_session,
     load_campaign_state,
@@ -136,6 +139,45 @@ async def test_save_and_get_variants():
     variants = await get_variants_for_session("sess-cv")
     assert len(variants) == 1
     assert variants[0]["body"] == "Hello"
+
+
+@pytest.mark.integration
+async def test_get_latest_variants_for_session_returns_latest_cycle_and_version():
+    base_time = datetime.now(timezone.utc)
+
+    await save_content_variant(
+        {
+            "session_id": "sess-cv-latest",
+            "id": "var-a",
+            "cycle_number": 1,
+            "body": "Old cycle body",
+            "created_at": base_time,
+        }
+    )
+    await save_content_variant(
+        {
+            "session_id": "sess-cv-latest",
+            "id": "var-a",
+            "cycle_number": 2,
+            "body": "Refined latest body",
+            "created_at": base_time + timedelta(seconds=1),
+        }
+    )
+    await save_content_variant(
+        {
+            "session_id": "sess-cv-latest",
+            "id": "var-b",
+            "cycle_number": 2,
+            "body": "Second latest variant",
+            "created_at": base_time + timedelta(seconds=2),
+        }
+    )
+
+    variants = await get_latest_variants_for_session("sess-cv-latest")
+
+    assert len(variants) == 2
+    assert {variant["id"] for variant in variants} == {"var-a", "var-b"}
+    assert next(v for v in variants if v["id"] == "var-a")["body"] == "Refined latest body"
 
 
 # ---------------------------------------------------------------------------

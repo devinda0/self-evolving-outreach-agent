@@ -5,10 +5,12 @@ Run with: pytest -m integration
 """
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.db.crud import save_content_variant
 from app.main import app
 
 TEST_DB = "signal_to_action_test"
@@ -66,6 +68,41 @@ async def test_get_campaign_state():
     assert state["session_id"] == session_id
     assert state["product_name"] == "Acme Widget"
     assert state["cycle_number"] == 1
+
+
+@pytest.mark.integration
+async def test_get_campaign_state_hydrates_saved_content_variants():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        start = await client.post(
+            "/campaign/start",
+            json={
+                "product_name": "Acme Widget",
+                "product_description": "A widget",
+                "target_market": "SMBs",
+            },
+        )
+        session_id = start.json()["session_id"]
+
+        await save_content_variant(
+            {
+                "session_id": session_id,
+                "id": "var-restore-1",
+                "cycle_number": 1,
+                "angle_label": "pain-point",
+                "intended_channel": "email",
+                "body": "Saved content body",
+                "cta": "Interested?",
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
+
+        resp = await client.get(f"/campaign/{session_id}/state")
+
+    assert resp.status_code == 200
+    state = resp.json()
+    assert len(state["content_variants"]) == 1
+    assert state["content_variants"][0]["body"] == "Saved content body"
 
 
 @pytest.mark.integration

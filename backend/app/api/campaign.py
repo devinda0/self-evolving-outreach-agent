@@ -13,7 +13,12 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from app.agents.graph import get_graph
-from app.db.crud import list_campaigns, load_campaign_state, save_campaign_state
+from app.db.crud import (
+    get_latest_variants_for_session,
+    list_campaigns,
+    load_campaign_state,
+    save_campaign_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,40 @@ async def _send_json_safe(websocket: WebSocket, data: Any) -> None:
     """Send JSON via WebSocket using a datetime-safe encoder."""
     text = json.dumps(data, cls=_DateSafeEncoder, separators=(",", ":"), ensure_ascii=False)
     await websocket.send_text(text)
+
+
+async def _load_active_campaign_state(session_id: str) -> dict[str, Any] | None:
+    """Load the most complete campaign snapshot available for a session."""
+    base_state = await load_campaign_state(session_id)
+    merged_state: dict[str, Any] | None = dict(base_state) if base_state else None
+
+    try:
+        graph = _get_or_init_graph()
+        config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+        state_snap = await graph.aget_state(config)  # type: ignore[arg-type]
+        if state_snap and state_snap.values:
+            merged_state = {**(merged_state or {}), **state_snap.values}
+    except Exception:
+        logger.warning(
+            "Could not load graph checkpoint state | session=%s",
+            session_id,
+            exc_info=True,
+        )
+
+    if merged_state is None:
+        return None
+
+    if not merged_state.get("content_variants"):
+        try:
+            merged_state["content_variants"] = await get_latest_variants_for_session(session_id)
+        except Exception:
+            logger.warning(
+                "Could not hydrate content variants from DB | session=%s",
+                session_id,
+                exc_info=True,
+            )
+
+    return merged_state
 
 
 # Cached compiled graph — initialized lazily after the DB connects at startup.
@@ -555,7 +594,7 @@ async def list_campaign_sessions() -> list[dict[str, Any]]:
 @router.get("/campaign/{session_id}/state")
 async def get_campaign_state(session_id: str) -> dict[str, Any]:
     """Return the current CampaignState for debugging / reconnection."""
-    state = await load_campaign_state(session_id)
+    state = await _load_active_campaign_state(session_id)
     if state is None:
         from fastapi import HTTPException
 
@@ -589,7 +628,7 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
 
     # Load campaign session (product context) — create a bare record if missing.
-    db_state = await load_campaign_state(session_id)
+    db_state = await _load_active_campaign_state(session_id)
     if db_state is None:
         db_state = _new_campaign_state(
             session_id,

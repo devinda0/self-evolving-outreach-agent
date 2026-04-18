@@ -144,12 +144,55 @@ async def save_content_variant(variant: dict[str, Any]) -> None:
 async def get_variants_for_session(session_id: str) -> list[dict[str, Any]]:
     """Return all content variants for a session."""
     db = get_db()
-    cursor = db[CONTENT_VARIANTS].find({"session_id": session_id})
+    cursor = db[CONTENT_VARIANTS].find({"session_id": session_id}).sort("created_at", ASCENDING)
     results = []
     async for doc in cursor:
         doc.pop("_id", None)
         results.append(doc)
     return results
+
+
+def _variant_created_at_sort_key(variant: dict[str, Any]) -> datetime:
+    """Return a timezone-aware created_at sort key for a content variant."""
+    created_at = variant.get("created_at")
+    if isinstance(created_at, datetime):
+        return created_at
+    if isinstance(created_at, str):
+        try:
+            return datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+async def get_latest_variants_for_session(session_id: str) -> list[dict[str, Any]]:
+    """Return the latest deduplicated variant set for a session.
+
+    Variants are inserted as append-only records, including refinements. This
+    helper scopes to the most recent cycle and keeps only the newest copy of
+    each variant ID so restored sessions surface the current saved content.
+    """
+    variants = await get_variants_for_session(session_id)
+    if not variants:
+        return []
+
+    latest_cycle = max(int(v.get("cycle_number") or 1) for v in variants)
+    latest_cycle_variants = [
+        v for v in variants if int(v.get("cycle_number") or 1) == latest_cycle
+    ]
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for variant in sorted(
+        latest_cycle_variants,
+        key=_variant_created_at_sort_key,
+        reverse=True,
+    ):
+        variant_key = str(variant.get("id") or variant.get("variant_id") or "")
+        if not variant_key or variant_key in deduped:
+            continue
+        deduped[variant_key] = variant
+
+    return sorted(deduped.values(), key=_variant_created_at_sort_key)
 
 
 # ---------------------------------------------------------------------------

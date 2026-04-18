@@ -249,6 +249,7 @@ export default function VariantGrid({ frame, onAction }: Props) {
   const refineAction = frame.actions.find(
     (a: UIAction) => a.action_type === "content_refine" || a.id === "refine-content"
   );
+  const hasFooterActions = Boolean(confirmAction || refineAction);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -529,61 +530,64 @@ export default function VariantGrid({ frame, onAction }: Props) {
       {/* A/B split indicator */}
       <ABSplitIndicator selectedCount={selected.size} />
 
-      {/* Footer actions */}
-      <div
-        style={{
-          padding: "12px 16px",
-          borderTop: "1px solid var(--border-subtle)",
-          marginTop: "8px",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          flexWrap: "wrap",
-        }}
-      >
-        <button type="button" className="btn-ghost" onClick={handleSelectAll} disabled={isPendingAction}>
-          Select All
-        </button>
-        <button type="button" className="btn-ghost" onClick={handleClearAll} disabled={isPendingAction}>
-          Clear
-        </button>
-        {refineAction && (
-          <button
-            type="button"
-            className="btn-ghost"
-            disabled={isPendingAction}
-            onClick={handleRefine}
-            style={{
-              color: "var(--warning)",
-              borderColor: "rgba(255,212,59,0.3)",
-            }}
-          >
-            Refine Content
-          </button>
-        )}
-        <button
-          type="button"
-          className="btn-accent"
-          disabled={selected.size === 0 || isPendingAction}
-          onClick={handleConfirm}
+      {hasFooterActions && (
+        <div
           style={{
-            marginLeft: "auto",
-            opacity: selected.size === 0 || isPendingAction ? 0.4 : 1,
+            padding: "12px 16px",
+            borderTop: "1px solid var(--border-subtle)",
+            marginTop: "8px",
             display: "flex",
             alignItems: "center",
-            gap: "6px",
+            gap: "8px",
+            flexWrap: "wrap",
           }}
         >
-          {isPendingAction ? (
-            <>
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              Queuing…
-            </>
-          ) : (
-            `Confirm Selected Variants (${selected.size})`
+          <button type="button" className="btn-ghost" onClick={handleSelectAll} disabled={isPendingAction}>
+            Select All
+          </button>
+          <button type="button" className="btn-ghost" onClick={handleClearAll} disabled={isPendingAction}>
+            Clear
+          </button>
+          {refineAction && (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={isPendingAction}
+              onClick={handleRefine}
+              style={{
+                color: "var(--warning)",
+                borderColor: "rgba(255,212,59,0.3)",
+              }}
+            >
+              Refine Content
+            </button>
           )}
-        </button>
-      </div>
+          {confirmAction && (
+            <button
+              type="button"
+              className="btn-accent"
+              disabled={selected.size === 0 || isPendingAction}
+              onClick={handleConfirm}
+              style={{
+                marginLeft: "auto",
+                opacity: selected.size === 0 || isPendingAction ? 0.4 : 1,
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              {isPendingAction ? (
+                <>
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Queuing…
+                </>
+              ) : (
+                `Confirm Selected Variants (${selected.size})`
+              )}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
