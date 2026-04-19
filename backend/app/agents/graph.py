@@ -13,6 +13,7 @@ from langgraph.types import Send
 
 from app.agents.checkpointer import MongoDBSaver
 from app.agents.content_agent import content_agent_node, content_refine_node
+from app.agents.linkedin_post_agent import linkedin_post_agent_node
 from app.agents.cycle_manager import refined_cycle_node
 from app.agents.deployment_agent import deployment_agent_node
 from app.agents.feedback_agent import feedback_agent_node
@@ -70,6 +71,7 @@ def route_from_orchestrator(state: CampaignState) -> str:
         "update_context",
         "mcp_configure",
         "lookup",
+        "linkedin_post",
     ):
         logger.info(
             "route_from_orchestrator → %s | session=%s intent=%s",
@@ -140,6 +142,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_node("update_context", update_context_node)
     builder.add_node("mcp_configure", mcp_config_node)
     builder.add_node("lookup", lookup_node)
+    builder.add_node("linkedin_post", linkedin_post_agent_node)
 
     # -- Entry point --
     builder.set_entry_point("orchestrator")
@@ -165,6 +168,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
             "update_context": "update_context",
             "mcp_configure": "mcp_configure",
             "lookup": "lookup",
+            "linkedin_post": "linkedin_post",
             END: END,
         },
     )
@@ -189,6 +193,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_edge("update_context", END)
     builder.add_edge("mcp_configure", END)
     builder.add_edge("lookup", END)
+    builder.add_edge("linkedin_post", END)
 
     return builder.compile(checkpointer=checkpointer)
 

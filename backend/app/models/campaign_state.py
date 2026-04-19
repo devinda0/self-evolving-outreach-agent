@@ -76,6 +76,13 @@ class CampaignState(TypedDict):
     engagement_results: list[dict]
     winning_variant_id: Optional[str]
 
+    # LinkedIn feed post stage
+    linkedin_post_phase: Optional[str]    # None | "composed" | "confirming" | "published"
+    linkedin_post_html: Optional[str]     # current flyer HTML being worked on
+    linkedin_post_caption: Optional[str]  # current post caption being worked on
+    linkedin_post_confirmed: bool         # publish gate (mirrors deployment_confirmed pattern)
+    linkedin_posts: Annotated[list, operator.add]  # published post records (accumulates)
+
     # Memory and error tracking
     memory_refs: dict
     error_messages: list[str]

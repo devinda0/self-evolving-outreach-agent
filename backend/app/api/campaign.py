@@ -97,6 +97,7 @@ _PROGRESS_NODES = frozenset(
         "update_context",
         "mcp_configure",
         "lookup",
+        "linkedin_post",
     }
 )
 
@@ -201,6 +202,12 @@ def _new_campaign_state(session_id: str, req: StartCampaignRequest) -> dict[str,
         "normalized_feedback_events": [],
         "engagement_results": [],
         "winning_variant_id": None,
+        # LinkedIn feed post
+        "linkedin_post_phase": None,
+        "linkedin_post_html": None,
+        "linkedin_post_caption": None,
+        "linkedin_post_confirmed": False,
+        "linkedin_posts": [],
         # Meta
         "memory_refs": {},
         "error_messages": [],
@@ -340,6 +347,18 @@ def _graph_rerun_intent(action_id: str, payload: dict[str, Any]) -> str | None:
     if action_id == "csv_upload_complete":
         return "Show me the current prospect list"
 
+    # LinkedIn feed post actions
+    if action_id == "publish_linkedin_post":
+        return "Post this to my LinkedIn feed"
+    if action_id == "refine_linkedin_post":
+        return "I want to refine the LinkedIn post"
+    if action_id == "confirm_linkedin_post":
+        return "Confirm and publish the LinkedIn post to my feed"
+    if action_id == "cancel_linkedin_post":
+        return "Go back and edit the LinkedIn post"
+    if action_id in ("monitor_linkedin_comments", "refresh_comments"):
+        return "Check for comments on my LinkedIn post"
+
     return None
 
 
@@ -386,6 +405,9 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
     # Content refinement: set phase so content_agent routes to refine
     if action_id == "content_refine":
         return {"content_phase": "refine"}
+    # LinkedIn post: cancel confirm → go back to composed phase
+    if action_id == "cancel_linkedin_post":
+        return {"linkedin_post_phase": "composed", "linkedin_post_confirmed": False}
     return {}
 
 
@@ -449,6 +471,7 @@ async def _run_graph_for_message(
     content: str,
     db_state: dict[str, Any],
     deployment_confirmed: bool = False,
+    linkedin_post_confirmed: bool = False,
 ) -> None:
     """Invoke the LangGraph graph for one user message turn.
 
@@ -492,6 +515,7 @@ async def _run_graph_for_message(
         "messages": [HumanMessage(content=content)],
         "session_complete": False,
         "deployment_confirmed": deployment_confirmed,
+        "linkedin_post_confirmed": linkedin_post_confirmed,
     }
 
     try:
@@ -519,7 +543,7 @@ async def _run_graph_for_message(
                     else ""
                 )
                 # Skip nodes that produce structured JSON, not user-facing prose
-                if node in ("orchestrator", "clarify", "content_agent", "content_refine", "deployment_agent", "answer", "update_context", "prospect_manage", "mcp_configure", "lookup"):
+                if node in ("orchestrator", "clarify", "content_agent", "content_refine", "deployment_agent", "answer", "update_context", "prospect_manage", "mcp_configure", "lookup", "linkedin_post"):
                     continue
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
@@ -810,11 +834,13 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                             logger.warning(
                                 "Could not pre-patch state for '%s'", action_id, exc_info=True
                             )
-                    # Only pass deployment_confirmed=True for explicit confirmation actions.
+                    # Only pass *_confirmed=True for explicit confirmation actions.
                     is_confirm = action_id in ("confirm_deploy", "confirm_deployment")
+                    is_confirm_linkedin = action_id == "confirm_linkedin_post"
                     await _run_graph_for_message(
                         websocket, session_id, synthetic_msg, db_state,
                         deployment_confirmed=is_confirm,
+                        linkedin_post_confirmed=is_confirm_linkedin,
                     )
                 else:
                     # Simple state-only updates (segment select, prospect confirm)

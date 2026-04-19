@@ -45,6 +45,7 @@ VALID_INTENTS = frozenset(
         "update_context",
         "mcp_configure",
         "lookup",
+        "linkedin_post",
     ]
 )
 
@@ -63,6 +64,7 @@ INTENT_TO_NODE = {
     "update_context": "update_context",
     "mcp_configure": "mcp_configure",
     "lookup": "lookup",
+    "linkedin_post": "linkedin_post",
 }
 
 SYSTEM_PROMPT = """You are the Orchestrator of Signal to Action, a multi-agent growth intelligence system.
@@ -80,6 +82,7 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 - feedback: user is reporting engagement results or a webhook event has arrived
 - refined_cycle: user wants to proceed to the next cycle, start a new iteration, restart the loop, or reference moving forward. This captures the current cycle's learnings and advances to the next cycle. Key phrases: "next cycle", "proceed to cycle N", "start over", "iterate", "new cycle", "run another cycle", "let's do cycle N"
 - mcp_configure: user wants to configure, add, remove, list, or manage MCP servers/tools — this includes providing MCP URLs, asking to connect external services via MCP, or managing tool integrations
+- linkedin_post: user wants to create a LinkedIn feed post with a flyer/visual, refine an existing flyer or caption, publish a composed post to LinkedIn, or monitor/reply to comments on a published LinkedIn post. This is a FEED POST (public wall post), NOT a direct message. Key phrases: "post flyer on linkedin", "create a linkedin post", "publish on linkedin", "share on my linkedin feed", "post to linkedin", "make a linkedin post", "check comments on my post", "reply to comments", "post this to my feed", "create a visual post for linkedin"
 - answer: user is asking a question about the campaign, product, system status, strategy, or any topic that can be answered from existing context — NOT requesting new research or content generation
 - update_context: user is providing clarifications, corrections, or additional information about their product, company, target market, goals, or preferences — NOT requesting an action
 - clarify: message is genuinely ambiguous and you cannot determine ANY of the above intents — generate a specific clarification question
@@ -106,6 +109,10 @@ When the user mentions cycles:
 - KEY DISTINCTION: lookup = find ONE specific named person. prospect_manage = discover MULTIPLE prospects for the campaign.
 - "configure MCP server" or "add mcp" or "connect brightdata" or any MCP/tool server URL → "mcp_configure"
 - "list mcp servers" or "show connected tools" or "remove mcp server" → "mcp_configure"
+- "post flyer on linkedin" or "create a linkedin post" or "publish on my linkedin" or "share on linkedin feed" or "post this to linkedin" or "make a visual post" or "I want to post on linkedin" → "linkedin_post" (ALWAYS use linkedin_post for LinkedIn FEED posts — never route these to "deploy" or "generate")
+- "check comments on my post" or "reply to linkedin comments" or "any comments?" or "monitor my post" → "linkedin_post"
+- If linkedin_post_phase is "composed" or "confirming" or "published" and user is interacting with the post (refining, publishing, checking comments) → "linkedin_post"
+- KEY DISTINCTION: "linkedin_post" = public feed post / wall post. "deploy" = sending direct messages or emails to prospects. Do NOT confuse them.
 - "proceed to next cycle" or "let's do cycle 2" or "start over with learnings" or "iterate" or "next round" → "refined_cycle"
 - If content variants already exist and the user asks to modify/edit/improve them (tone change, shorten, rewrite, adjust CTA, etc.) → "content_refine"
 - "make it more casual" or "shorten the emails" or "rewrite the subject lines" or "change the tone to professional" or "make it punchier" → "content_refine" (ONLY when variants exist)
@@ -122,12 +129,12 @@ When the user mentions cycles:
 
 ## Output format (strict JSON, no prose, no markdown code blocks)
 {{
-  "current_intent": "<one of: research, segment, prospect_manage, lookup, generate, content_refine, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
+  "current_intent": "<one of: research, segment, prospect_manage, lookup, generate, content_refine, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify, linkedin_post>",
   "reasoning": "<one sentence explaining your classification>",
   "user_directive": "<a clear, actionable summary of WHAT the user wants the next agent to do — capture specific focus areas, constraints, preferences, and tone from the user's message. Examples: 'Research competitor pricing strategies for enterprise SaaS', 'Generate 3 email variants with a casual, friendly tone focused on cost savings', 'Deploy only the ROI-focused variant to top 3 prospects'. This MUST reflect the user's specific request, not a generic description of what the agent does.>",
   "clarification_question": "<only if current_intent=clarify, else null>",
   "clarification_options": ["<option1>", "<option2>", "..."],
-  "next_node": "<research, segment, prospect_manage, lookup, generate, content_refine, deploy, feedback, refined_cycle, answer, update_context, clarify>"
+  "next_node": "<research, segment, prospect_manage, lookup, generate, content_refine, deploy, feedback, refined_cycle, answer, update_context, clarify, linkedin_post>"
 }}"""
 
 DEFAULT_CLARIFICATION = (
@@ -350,6 +357,7 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
 - Prior intent: {prior_intent}{lookup_hint}
 - Content variants exist: {"yes (" + str(len(state.get("content_variants", []))) + " variants)" if state.get("content_variants") else "no"}
 - Content clarification questions pending: {len(pending_qs)} {"(user's message likely contains answers to these questions → route to 'generate')" if pending_qs else ""}
+- LinkedIn post phase: {state.get("linkedin_post_phase") or "none"} {"(active LinkedIn post session — keep routing to linkedin_post)" if state.get("linkedin_post_phase") else ""}
 
 {cycle_context}
 

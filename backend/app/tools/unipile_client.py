@@ -343,6 +343,73 @@ async def send_linkedin_message_direct(
     return {"provider_message_id": provider_message_id, "chat_id": chat.get("id")}
 
 
+async def create_linkedin_post(
+    text: str,
+    *,
+    account_id: str | None = None,
+) -> dict[str, Any]:
+    """Publish a text post to the connected LinkedIn account via Unipile.
+
+    Returns the Unipile response dict which includes 'id' or 'provider_id' for the post.
+    """
+    config_errors = get_unipile_config_errors(require_account=True)
+    if config_errors:
+        raise ValueError(" | ".join(config_errors))
+
+    resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    return await _request(
+        "POST",
+        "/api/v1/posts",
+        json_body={"account_id": resolved_account_id, "text": text},
+    )
+
+
+async def list_post_comments(
+    post_provider_id: str,
+    *,
+    account_id: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Fetch comments on a published LinkedIn post.
+
+    Returns a list of comment dicts (id, author, text/content). Returns an empty
+    list on any error so callers don't need to handle exceptions.
+    """
+    resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    try:
+        data = await _request(
+            "GET",
+            f"/api/v1/posts/{quote(post_provider_id, safe='')}/comments",
+            params={"account_id": resolved_account_id, "limit": limit},
+        )
+    except Exception as exc:
+        logger.warning("list_post_comments: failed for post=%s: %s", post_provider_id, exc)
+        return []
+
+    items = data.get("items") or data.get("data") or []
+    return items if isinstance(items, list) else []
+
+
+async def reply_to_post_comment(
+    post_provider_id: str,
+    comment_provider_id: str,
+    text: str,
+    *,
+    account_id: str | None = None,
+) -> dict[str, Any]:
+    """Post a reply to a comment on a LinkedIn post."""
+    resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    return await _request(
+        "POST",
+        f"/api/v1/posts/{quote(post_provider_id, safe='')}/comments",
+        json_body={
+            "account_id": resolved_account_id,
+            "text": text,
+            "parent_comment_id": comment_provider_id,
+        },
+    )
+
+
 async def get_unipile_connection_health(account_id: str | None = None) -> dict[str, Any]:
     """Run a read-only Unipile probe for the configured LinkedIn account."""
     config_errors = get_unipile_config_errors(require_account=False)
