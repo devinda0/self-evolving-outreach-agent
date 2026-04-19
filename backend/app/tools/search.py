@@ -28,25 +28,35 @@ def _cache_key(*parts: str) -> str:
 async def search_web(
     query: str,
     max_results: int = 5,
-    recency_days: int = 30,
+    recency_days: int | None = 30,
+    include_domains: list[str] | None = None,
 ) -> list[dict]:
-    """Search the web using Tavily. Returns list of {title, url, content, score}."""
-    cache_key = _cache_key("search", query, str(max_results), str(recency_days))
+    """Search the web using Tavily. Returns list of {title, url, content, score}.
+
+    Pass recency_days=None to search without any date restriction (needed for
+    person/profile lookups where content age is irrelevant).
+    """
+    cache_key = _cache_key("search", query, str(max_results), str(recency_days), str(include_domains))
     cached = await get_cached_tool_result(cache_key)
     if cached is not None:
         return cached
+
+    payload: dict = {
+        "api_key": settings.TAVILY_API_KEY,
+        "query": query,
+        "search_depth": "advanced",
+        "max_results": max_results,
+    }
+    if recency_days is not None:
+        payload["days"] = recency_days
+    if include_domains:
+        payload["include_domains"] = include_domains
 
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 TAVILY_SEARCH_URL,
-                json={
-                    "api_key": settings.TAVILY_API_KEY,
-                    "query": query,
-                    "search_depth": "advanced",
-                    "max_results": max_results,
-                    "days": recency_days,
-                },
+                json=payload,
                 timeout=_TIMEOUT,
             )
             response.raise_for_status()

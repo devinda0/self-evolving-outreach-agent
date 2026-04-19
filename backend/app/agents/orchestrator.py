@@ -102,6 +102,7 @@ When the user mentions cycles:
 - "who are we sending to?" or "show selected prospects" → "prospect_manage"
 - "find some prospects" or "can you find prospects?" or "discover prospects" or "search for prospects" or "find me some targets" → "prospect_manage"
 - "what is [specific person]'s LinkedIn?" or "find [name]'s LinkedIn profile" or "what is his/her username?" or "look up [specific name]" or "can you find it through internet?" (when prior turn was about a specific person) or "search for [name] on LinkedIn" → "lookup"
+- If prior_intent is "lookup" AND the user's message provides more context about the person (company, university, role, location) without requesting a completely different action → "lookup" again (retry with the new context)
 - KEY DISTINCTION: lookup = find ONE specific named person. prospect_manage = discover MULTIPLE prospects for the campaign.
 - "configure MCP server" or "add mcp" or "connect brightdata" or any MCP/tool server URL → "mcp_configure"
 - "list mcp servers" or "show connected tools" or "remove mcp server" → "mcp_configure"
@@ -334,13 +335,19 @@ async def orchestrator_node(state: CampaignState) -> dict[str, Any]:
     )
 
     pending_qs = state.get("content_pending_questions", []) or []
+    prior_intent = state.get("current_intent") or stage.get("previous_intent", "none")
+    lookup_hint = (
+        " ← IMPORTANT: prior turn was a lookup. If the user is now providing more context "
+        "(company, university, role, location) about the same person, classify as 'lookup' again."
+        if prior_intent == "lookup" else ""
+    )
     prompt = f"""Campaign context:
 - Product: {task.get("product_name", "Unknown")}
 - Description: {state.get("product_description", "No description")}
 - Target Market: {task.get("target_market", "Unknown")}
 - Stage: {stage.get("active_stage_summary", "starting")}
 - Cycle: {cycle_number}
-- Prior intent: {stage.get("previous_intent", "none")}
+- Prior intent: {prior_intent}{lookup_hint}
 - Content variants exist: {"yes (" + str(len(state.get("content_variants", []))) + " variants)" if state.get("content_variants") else "no"}
 - Content clarification questions pending: {len(pending_qs)} {"(user's message likely contains answers to these questions → route to 'generate')" if pending_qs else ""}
 
@@ -1157,9 +1164,18 @@ If a LinkedIn URL is found, always extract the username from it.
 Format your response in a clear, conversational way.
 If nothing was found, say so honestly and suggest alternative approaches."""
 
-LOOKUP_EXTRACT_PROMPT = """Extract the person name and any additional context (company, role) from this user message.
-Return JSON only: {{"name": "...", "company": "...", "role": "...", "context": "..."}}
-If company/role/context not mentioned, use null."""
+LOOKUP_EXTRACT_PROMPT = """You extract the target person's details from a conversation thread.
+Look at ALL messages (not just the latest) to piece together the full picture of who is being searched.
+
+Return JSON only:
+{{"name": "Full Name", "company": "company or university name", "role": "job title or student", "context": "any other detail"}}
+
+Rules:
+- name: the person being looked up (required — infer from full thread if latest msg only says "find it" or provides extra context)
+- company: their employer OR university — whichever is mentioned
+- role: job title, "student", or null
+- context: any other identifying detail
+- All fields except name may be null if not mentioned anywhere in the thread"""
 
 
 async def lookup_node(state: CampaignState) -> dict[str, Any]:
@@ -1220,26 +1236,38 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
         person_name = directive or user_query
 
     # Step 2: Build targeted search queries
-    search_queries = []
-    if person_name:
-        base = person_name.strip()
-        if company_hint:
-            base = f"{base} {company_hint}"
-        search_queries = [
-            f"{base} LinkedIn profile",
-            f"site:linkedin.com/in {base}",
-        ]
+    base = (person_name or user_query).strip()
+    if company_hint:
+        base_with_company = f"{base} {company_hint}"
     else:
-        search_queries = [user_query]
+        base_with_company = base
 
-    # Step 3: Run searches
+    # Step 3: Run searches — no recency filter (LinkedIn profiles are evergreen)
     all_results: list[dict] = []
-    for query in search_queries[:2]:
+
+    # Primary: LinkedIn domain-targeted search (no date filter)
+    try:
+        results = await search_web(
+            f"{base_with_company} LinkedIn",
+            max_results=5,
+            recency_days=None,
+            include_domains=["linkedin.com"],
+        )
+        all_results.extend(results)
+    except Exception as e:
+        logger.warning("lookup_node: linkedin domain search failed: %s", e)
+
+    # Fallback: broad search if LinkedIn search returned nothing
+    if not all_results:
         try:
-            results = await search_web(query, max_results=5, recency_days=365)
+            results = await search_web(
+                f"{base_with_company} LinkedIn profile",
+                max_results=5,
+                recency_days=None,
+            )
             all_results.extend(results)
         except Exception as e:
-            logger.warning("lookup_node: search failed for %r: %s", query, e)
+            logger.warning("lookup_node: broad search failed: %s", e)
 
     # Step 4: Extract LinkedIn info using LLM
     linkedin_url = ""
