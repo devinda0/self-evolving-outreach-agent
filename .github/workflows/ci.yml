@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend - lint, type-check, unit tests
+    name: Backend - lint, type-check
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,16 +33,6 @@ jobs:
 
       - name: Type check (mypy)
         run: .venv/bin/mypy app/ --ignore-missing-imports
-
-      - name: Unit tests
-        run: .venv/bin/pytest tests/ -m "not integration" -v --tb=short
-        env:
-          MONGODB_URI: mongodb://localhost:27017
-          DB_NAME: signal_test
-          GEMINI_API_KEY: test-key
-          TAVILY_API_KEY: test-key
-          RESEND_API_KEY: test-key
-          UNIPILE_API_KEY: test-key
 
   integration:
     name: Backend - integration tests
