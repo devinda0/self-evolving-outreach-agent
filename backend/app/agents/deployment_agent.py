@@ -449,14 +449,34 @@ async def deployment_agent_node(state: CampaignState) -> dict:
 
     if not selected_prospects:
         logger.warning("deployment_agent_node: no prospects available | session=%s", session_id)
-        error_text = (
-            "I couldn't find any prospects with email addresses or LinkedIn profiles to send to. "
-            "Please make sure your prospects have a communication method set, then try again."
+        # Give actionable guidance based on what channels are intended
+        linkedin_channel_used = any(
+            (v.get("intended_channel") or "email") == "linkedin" for v in selected_variants
         )
+        if linkedin_channel_used and not settings.USE_MOCK_SEND:
+            from app.tools.unipile_client import get_unipile_config_errors
+            unipile_errors = get_unipile_config_errors(require_account=True)
+            if unipile_errors:
+                error_text = (
+                    "Cannot send LinkedIn messages — Unipile is not configured:\n\n"
+                    + "\n".join(f"• {e}" for e in unipile_errors)
+                    + "\n\nSet `USE_MOCK_SEND=true` to test without real sends, or configure the Unipile credentials above."
+                )
+            else:
+                error_text = (
+                    "Your prospects don't have LinkedIn profile URLs set. "
+                    "Use the **lookup** feature to find each person's LinkedIn profile first (e.g. 'find LinkedIn for Jane Doe'), "
+                    "then try deploying again."
+                )
+        else:
+            error_text = (
+                "I couldn't find any prospects with email addresses or LinkedIn profiles to send to. "
+                "Please make sure your prospects have a communication method set, then try again."
+            )
         return {
             "next_node": "orchestrator",
             "session_complete": True,
-            "error_messages": ["No prospects found. Please run segmentation before deploying."],
+            "error_messages": ["No prospects found with contact methods."],
             "pending_ui_frames": [
                 UIFrame(
                     type="text",

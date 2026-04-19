@@ -1453,13 +1453,30 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
             ],
         ).model_dump())
 
+    # Persist the found prospect into state so linkedin_url is available at deploy time.
+    # prospect_cards uses a replace reducer — we must carry forward existing cards.
+    state_update: dict[str, Any] = {
+        "active_stage_summary": f"looked up {person_name or 'person'}",
+        "session_complete": True,
+        "pending_ui_frames": ui_frames,
+    }
+
+    if found and linkedin_url and person_name:
+        existing_cards: list[dict] = list(state.get("prospect_cards") or [])
+        existing_ids = {c.get("id") for c in existing_cards}
+        if found_prospect["id"] not in existing_ids:
+            existing_cards = [*existing_cards, found_prospect]
+
+        existing_selected: list[str] = list(state.get("selected_prospect_ids") or [])
+        if found_prospect["id"] not in existing_selected:
+            existing_selected = [*existing_selected, found_prospect["id"]]
+
+        state_update["prospect_cards"] = existing_cards
+        state_update["selected_prospect_ids"] = existing_selected
+
     logger.info(
         "lookup_node completed | session=%s person=%r found=%s confidence=%s linkedin=%r",
         session_id, person_name, found, confidence, linkedin_url,
     )
 
-    return {
-        "active_stage_summary": f"looked up {person_name or 'person'}",
-        "session_complete": True,
-        "pending_ui_frames": ui_frames,
-    }
+    return state_update
