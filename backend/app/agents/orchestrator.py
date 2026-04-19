@@ -1151,18 +1151,31 @@ Extract context updates from the user's latest message."""
 # Lookup node — targeted search for a specific named individual
 # ---------------------------------------------------------------------------
 
-LOOKUP_SYSTEM_PROMPT = """You are a research assistant that finds LinkedIn profiles and contact details for specific individuals.
+LOOKUP_SYSTEM_PROMPT = """You are a research assistant that finds LinkedIn profiles for a specific individual.
 
-Given the search results below, extract:
-1. LinkedIn profile URL (if found)
-2. LinkedIn username/handle (the part after linkedin.com/in/)
-3. Current job title and company
-4. Any other relevant contact info (email, Twitter, etc.)
+Your job: examine the search results and determine if ANY result is the specific person being looked for.
 
-Be accurate — only report information that is clearly present in the search results.
-If a LinkedIn URL is found, always extract the username from it.
-Format your response in a clear, conversational way.
-If nothing was found, say so honestly and suggest alternative approaches."""
+CRITICAL MATCHING RULES:
+- The person's FULL NAME must appear in the URL, page title, or snippet — partial name matches (e.g. only first name or only last name) do NOT count
+- If the search results contain the exact full name (both first and last name together), that IS a match
+- If results only show people who share one part of the name (e.g. only "Devinda" without "Dilshan"), that is NOT a match
+
+Return STRICT JSON only — no prose, no markdown:
+{{
+  "found": true/false,
+  "linkedin_url": "https://linkedin.com/in/username or null",
+  "linkedin_username": "username or null",
+  "name": "full name as it appears on the profile or null",
+  "title": "job title or null",
+  "company": "company or university or null",
+  "confidence": "high/medium/low",
+  "message": "A 2-3 sentence human-readable summary. If found: state the URL and key details. If not found: explain what was found instead and suggest the user try LinkedIn's own search at linkedin.com/search/results/people/?keywords=NAME"
+}}
+
+confidence levels:
+- high: exact full name match in URL (e.g. linkedin.com/in/devinda-dilshan) AND title/company match context
+- medium: exact full name match in title or snippet, profile URL found
+- low: partial match or uncertain"""
 
 LOOKUP_EXTRACT_PROMPT = """You extract the target person's details from a conversation thread.
 Look at ALL messages (not just the latest) to piece together the full picture of who is being searched.
@@ -1184,148 +1197,163 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
     Does a targeted web search for ONE person rather than bulk prospect discovery.
     Results are shown inline in chat with an option to add to the prospect list.
     """
-    from app.agents.prospect_manager import _create_manual_prospect, build_prospect_manager_frame
+    import re as _re
+
+    from app.agents.prospect_manager import _create_manual_prospect
     from app.tools.search import search_web
 
     session_id = state.get("session_id", "unknown")
     logger.info("lookup_node called | session=%s", session_id)
 
-    # Extract the latest user message
+    # Extract the latest user message and build prior context
     messages = state.get("messages", [])
     user_query = ""
-    for msg in reversed(messages):
-        if hasattr(msg, "type") and msg.type == "human":
-            user_query = msg.content if isinstance(msg.content, str) else str(msg.content)
-            break
-        elif isinstance(msg, dict) and msg.get("role") == "user":
-            user_query = msg.get("content", "")
-            break
-
-    # Also look back at prior messages for context (e.g. user asked about Devinda, then said "find it")
     prior_context = ""
     count = 0
     for msg in reversed(messages):
-        if count >= 6:
-            break
         if hasattr(msg, "type") and hasattr(msg, "content"):
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            prior_context = f"[{msg.type}]: {content[:300]}\n" + prior_context
+            if not user_query and getattr(msg, "type", "") == "human":
+                user_query = content
+            if count < 8:
+                prior_context = f"[{msg.type}]: {content[:300]}\n" + prior_context
+        elif isinstance(msg, dict):
+            content = msg.get("content", "")
+            if not user_query and msg.get("role") == "user":
+                user_query = content
+            if count < 8:
+                prior_context = f"[{msg.get('role', 'unknown')}]: {content[:300]}\n" + prior_context
         count += 1
 
     llm = _get_llm()
     ui_frames: list[dict[str, Any]] = []
 
-    # Step 1: Extract person name from user query + prior context
+    # Step 1: Extract person name + context from full conversation thread
     person_name = ""
     company_hint = ""
+    role_hint = ""
     if llm:
         try:
             extract_response = await llm.ainvoke([
                 {"role": "system", "content": LOOKUP_EXTRACT_PROMPT},
-                {"role": "user", "content": f"Recent conversation:\n{prior_context}\n\nLatest message: {user_query}"},
+                {"role": "user", "content": f"Full conversation:\n{prior_context}\n\nLatest message: {user_query}"},
             ])
             extracted = _parse_llm_response(extract_response.content)
             person_name = extracted.get("name") or ""
             company_hint = extracted.get("company") or ""
+            role_hint = extracted.get("role") or ""
         except Exception as e:
             logger.warning("lookup_node: name extraction failed: %s", e)
 
     if not person_name:
-        # Fallback: try to pull a name from user_directive or the query itself
         directive = state.get("user_directive") or ""
         person_name = directive or user_query
 
-    # Step 2: Build targeted search queries
-    base = (person_name or user_query).strip()
-    if company_hint:
-        base_with_company = f"{base} {company_hint}"
-    else:
-        base_with_company = base
+    # Step 2: Build search queries using QUOTED name for exact phrase matching
+    quoted_name = f'"{person_name.strip()}"' if person_name else user_query
+    context_parts = [p for p in [company_hint, role_hint] if p]
+    context_str = " ".join(context_parts)
 
     # Step 3: Run searches — no recency filter (LinkedIn profiles are evergreen)
     all_results: list[dict] = []
 
-    # Primary: LinkedIn domain-targeted search (no date filter)
+    # Primary: LinkedIn domain search with quoted name + context
+    primary_query = f"{quoted_name} {context_str}".strip() if context_str else quoted_name
     try:
         results = await search_web(
-            f"{base_with_company} LinkedIn",
-            max_results=5,
+            primary_query,
+            max_results=7,
             recency_days=None,
             include_domains=["linkedin.com"],
         )
         all_results.extend(results)
+        logger.info("lookup_node: linkedin domain search returned %d results for %r", len(results), primary_query)
     except Exception as e:
         logger.warning("lookup_node: linkedin domain search failed: %s", e)
 
-    # Fallback: broad search if LinkedIn search returned nothing
-    if not all_results:
+    # Fallback: broad search without domain filter
+    if len(all_results) < 3:
+        fallback_query = f"{quoted_name} {context_str} LinkedIn".strip()
         try:
-            results = await search_web(
-                f"{base_with_company} LinkedIn profile",
-                max_results=5,
-                recency_days=None,
-            )
+            results = await search_web(fallback_query, max_results=5, recency_days=None)
             all_results.extend(results)
+            logger.info("lookup_node: broad fallback returned %d results for %r", len(results), fallback_query)
         except Exception as e:
-            logger.warning("lookup_node: broad search failed: %s", e)
+            logger.warning("lookup_node: broad fallback search failed: %s", e)
 
-    # Step 4: Extract LinkedIn info using LLM
+    # Step 4: LLM synthesis — returns structured JSON
     linkedin_url = ""
-    linkedin_username = ""
-    found_prospect: dict[str, Any] | None = None
+    found = False
+    confidence = "low"
+    answer_text = ""
+    extracted_title = ""
+    extracted_company = company_hint
 
     if all_results and llm:
         results_text = "\n\n".join(
-            f"URL: {r.get('url', '')}\nTitle: {r.get('title', '')}\nSnippet: {r.get('content', '')[:400]}"
-            for r in all_results[:8]
+            f"URL: {r.get('url', '')}\nTitle: {r.get('title', '')}\nSnippet: {r.get('content', '')[:500]}"
+            for r in all_results[:10]
         )
         try:
             lookup_response = await llm.ainvoke([
                 {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
-                {"role": "user", "content": f"I'm looking for: {person_name or user_query}\n\nSearch results:\n{results_text}"},
+                {
+                    "role": "user",
+                    "content": (
+                        f"I'm looking for: {person_name or user_query}"
+                        + (f" (works/studies at: {context_str})" if context_str else "")
+                        + f"\n\nSearch results:\n{results_text}"
+                    ),
+                },
             ])
-            answer_text = lookup_response.content
+            parsed = _parse_llm_response(lookup_response.content)
+            found = bool(parsed.get("found"))
+            linkedin_url = parsed.get("linkedin_url") or ""
+            confidence = parsed.get("confidence", "low")
+            answer_text = parsed.get("message", "")
+            extracted_title = parsed.get("title") or ""
+            extracted_company = parsed.get("company") or company_hint
 
-            # Try to extract LinkedIn URL for prospect card
-            import re as _re
-            li_match = _re.search(r"linkedin\.com/in/([\w\-]+)", results_text + answer_text)
-            if li_match:
-                linkedin_username = li_match.group(1)
-                linkedin_url = f"https://www.linkedin.com/in/{linkedin_username}"
+            # Verify: if LLM says found but URL doesn't contain the person's name parts, downgrade
+            if found and linkedin_url:
+                name_parts = [p.lower() for p in (person_name or "").split() if len(p) > 2]
+                url_lower = linkedin_url.lower()
+                if name_parts and not any(part in url_lower for part in name_parts):
+                    found = False
+                    confidence = "low"
+                    logger.info("lookup_node: URL %r failed name-part validation for %r", linkedin_url, person_name)
 
         except Exception as e:
             logger.error("lookup_node: LLM synthesis failed: %s", e)
-            answer_text = f"I searched for **{person_name or user_query}** but encountered an error synthesizing the results. Please try again."
+            answer_text = f"I searched for **{person_name or user_query}** but encountered an error. Please try again."
     elif not all_results:
+        search_url = f"https://www.linkedin.com/search/results/people/?keywords={person_name.replace(' ', '%20')}"
         answer_text = (
             f"I searched for **{person_name or user_query}** but couldn't find any results. "
-            "Try providing more context like their company name or job title."
+            f"Try searching directly on LinkedIn: {search_url}"
         )
     else:
-        # No LLM — return raw results
-        answer_text = f"Found {len(all_results)} search results for **{person_name or user_query}**:\n\n"
-        for r in all_results[:3]:
-            answer_text += f"- [{r.get('title', 'Link')}]({r.get('url', '')})\n"
+        answer_text = f"Found {len(all_results)} results for **{person_name or user_query}** but couldn't analyse them (no LLM available)."
 
-    # Step 5: Build response frame
+    # Step 5: Build text response frame
     instance_id = f"lookup_{uuid4().hex[:8]}"
-    text_frame = UIFrame(
+    ui_frames.append(UIFrame(
         type="text",
         component="MessageRenderer",
         instance_id=instance_id,
         props={"content": answer_text, "role": "assistant"},
         actions=[],
-    ).model_dump()
-    ui_frames.append(text_frame)
+    ).model_dump())
 
-    # Step 6: If we found a LinkedIn profile, offer to add to prospect list
-    if linkedin_url and person_name:
+    # Step 6: Only show ProspectManager when LLM confirmed a match with medium/high confidence
+    if found and linkedin_url and confidence in ("high", "medium") and person_name:
         found_prospect = _create_manual_prospect({
             "name": person_name,
             "linkedin_url": linkedin_url,
-            "company": company_hint or "",
+            "title": extracted_title,
+            "company": extracted_company,
         })
-        offer_frame = UIFrame(
+        ui_frames.append(UIFrame(
             type="ui_component",
             component="ProspectManager",
             instance_id=f"lookup-prospect-{session_id[:8]}-{uuid4().hex[:4]}",
@@ -1345,14 +1373,11 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
                     payload={},
                 ),
             ],
-        ).model_dump()
-        ui_frames.append(offer_frame)
+        ).model_dump())
 
     logger.info(
-        "lookup_node completed | session=%s person=%r linkedin=%r",
-        session_id,
-        person_name,
-        linkedin_url,
+        "lookup_node completed | session=%s person=%r found=%s confidence=%s linkedin=%r",
+        session_id, person_name, found, confidence, linkedin_url,
     )
 
     return {
