@@ -1,7 +1,12 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.api.campaign import _load_active_campaign_state, _sync_prospect_manager_ui_action
+from app.api.campaign import (
+    _load_active_campaign_state,
+    _state_delta_before_rerun,
+    _sync_prospect_manager_ui_action,
+)
+from app.agents.linkedin_post_agent import build_linkedin_post_confirm_frame
 
 
 async def test_load_active_campaign_state_hydrates_saved_variants():
@@ -196,3 +201,23 @@ async def test_sync_prospect_manager_ui_action_removes_selected_prospects():
     graph_patch = mock_graph.aupdate_state.await_args.args[1]
     assert [card["id"] for card in graph_patch["prospect_cards"]] == ["p-001"]
     assert graph_patch["selected_prospect_ids"] == ["p-001"]
+
+
+def test_state_delta_before_rerun_persists_linkedin_caption_edits():
+    payload = {"caption": "Updated LinkedIn caption"}
+
+    delta = _state_delta_before_rerun("publish_linkedin_post", payload)
+
+    assert delta == {"linkedin_post_caption": "Updated LinkedIn caption"}
+
+
+def test_linkedin_confirm_frame_includes_full_preview_content():
+    frame = build_linkedin_post_confirm_frame(
+        "<div>Flyer</div>",
+        "A full LinkedIn caption",
+        "li-confirm-1234",
+    )
+
+    assert frame["props"]["html"] == "<div>Flyer</div>"
+    assert frame["props"]["caption"] == "A full LinkedIn caption"
+    assert frame["props"]["caption_preview"] == "A full LinkedIn caption"

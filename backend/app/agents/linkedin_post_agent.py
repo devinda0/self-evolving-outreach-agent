@@ -260,7 +260,7 @@ def build_linkedin_post_composer_frame(html: str, caption: str, instance_id: str
     ).model_dump()
 
 
-def build_linkedin_post_confirm_frame(caption: str, instance_id: str) -> dict:
+def build_linkedin_post_confirm_frame(html: str, caption: str, instance_id: str) -> dict:
     """Confirmation gate shown before the post is actually published."""
     preview = caption[:250] + "…" if len(caption) > 250 else caption
     return UIFrame(
@@ -268,6 +268,8 @@ def build_linkedin_post_confirm_frame(caption: str, instance_id: str) -> dict:
         component="LinkedInPostConfirm",
         instance_id=instance_id,
         props={
+            "html": html,
+            "caption": caption,
             "caption_preview": preview,
             "channel": "linkedin_feed",
             "warning": "This will publish the post to your connected LinkedIn account.",
@@ -463,6 +465,7 @@ async def _refine_post(
 
 async def _show_publish_confirm(state: CampaignState, session_id: str) -> dict:
     """Phase 3 — show publish confirmation gate before sending to LinkedIn."""
+    html = state.get("linkedin_post_html") or ""
     caption = state.get("linkedin_post_caption") or ""
 
     ui_frames = [
@@ -479,7 +482,7 @@ async def _show_publish_confirm(state: CampaignState, session_id: str) -> dict:
             },
             actions=[],
         ).model_dump(),
-        build_linkedin_post_confirm_frame(caption, f"li-confirm-{session_id[:8]}"),
+        build_linkedin_post_confirm_frame(html, caption, f"li-confirm-{session_id[:8]}"),
     ]
 
     logger.info("_show_publish_confirm: awaiting confirmation | session=%s", session_id)

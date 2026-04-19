@@ -54,7 +54,6 @@ interface CampaignStore {
   setCurrentStage: (stage: string | null) => void;
   setCampaignName: (name: string | null) => void;
   addErrorMessage: (message: string) => void;
-  hydrateMessages: (messages: Message[]) => void;
   resetSession: () => void;
 }
 
@@ -136,11 +135,6 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
         },
       ],
       isWaitingForResponse: false,
-    })),
-
-  hydrateMessages: (messages) =>
-    set((s) => ({
-      messages: s.messages.length > 0 ? s.messages : messages,
     })),
 
   resetSession: () =>

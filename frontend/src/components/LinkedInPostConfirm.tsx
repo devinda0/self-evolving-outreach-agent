@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { UIFrame, UIAction } from "../store/campaignStore";
 import { useCampaignStore } from "../store/campaignStore";
 
@@ -24,8 +25,13 @@ function ArrowLeftIcon() {
 }
 
 export default function LinkedInPostConfirm({ frame, onAction }: Props) {
-  const caption = (frame.props.caption as string) ?? "";
+  const html = (frame.props.html as string) ?? "";
+  const caption =
+    (frame.props.caption as string) ??
+    (frame.props.caption_preview as string) ??
+    "";
   const isPendingAction = useCampaignStore((s) => s.isPendingAction);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const confirmAction = frame.actions.find(
     (a: UIAction) => a.action_type === "confirm_linkedin_post" || a.id === "confirm_linkedin_post",
@@ -33,6 +39,24 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
   const cancelAction = frame.actions.find(
     (a: UIAction) => a.action_type === "cancel_linkedin_post" || a.id === "cancel_linkedin_post",
   );
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !html) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    doc.open();
+    doc.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <style>*{margin:0;padding:0;box-sizing:border-box;}body{background:transparent;display:flex;justify-content:center;}</style>
+    </head><body>${html}</body></html>`);
+    doc.close();
+    const resize = () => {
+      if (doc.body) iframe.style.height = doc.body.scrollHeight + "px";
+    };
+    setTimeout(resize, 100);
+    setTimeout(resize, 600);
+  }, [html]);
 
   function handleConfirm() {
     const id = confirmAction?.id ?? "confirm_linkedin_post";
@@ -65,6 +89,18 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
           Confirm LinkedIn Post
         </span>
       </div>
+
+      {/* Flyer preview */}
+      {html && (
+        <div style={{ padding: "16px", background: "var(--bg-surface-1)", display: "flex", justifyContent: "center", borderBottom: "1px solid var(--border-subtle)" }}>
+          <iframe
+            ref={iframeRef}
+            title="LinkedIn Flyer Confirmation Preview"
+            sandbox="allow-same-origin"
+            style={{ width: "100%", maxWidth: "600px", border: "none", borderRadius: "8px", background: "transparent", minHeight: "200px" }}
+          />
+        </div>
+      )}
 
       {/* Caption preview */}
       <div style={{ padding: "16px 20px" }}>

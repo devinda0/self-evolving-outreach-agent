@@ -407,6 +407,13 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
     # Content refinement: set phase so content_agent routes to refine
     if action_id == "content_refine":
         return {"content_phase": "refine"}
+    if action_id in ("publish_linkedin_post", "refine_linkedin_post"):
+        delta: dict[str, Any] = {}
+        if "caption" in payload:
+            delta["linkedin_post_caption"] = payload.get("caption", "")
+        if "html" in payload:
+            delta["linkedin_post_html"] = payload.get("html", "")
+        return delta
     # LinkedIn post: cancel confirm → go back to composed phase
     if action_id == "cancel_linkedin_post":
         return {"linkedin_post_phase": "composed", "linkedin_post_confirmed": False}
