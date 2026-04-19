@@ -13,6 +13,10 @@ export { default as ManualFeedbackInput } from "./ManualFeedbackInput";
 export { default as QuarantineViewer } from "./QuarantineViewer";
 export { default as VisualArtifact } from "./VisualArtifact";
 export { default as MCPServerManager } from "./MCPServerManager";
+export { default as LinkedInPostComposer } from "./LinkedInPostComposer";
+export { default as LinkedInPostConfirm } from "./LinkedInPostConfirm";
+export { default as LinkedInPostPublished } from "./LinkedInPostPublished";
+export { default as LinkedInCommentReview } from "./LinkedInCommentReview";
 export {
   SegmentSelector,
   ProspectPicker,

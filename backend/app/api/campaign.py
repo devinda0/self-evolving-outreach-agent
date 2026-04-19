@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -14,10 +14,12 @@ from pydantic import BaseModel
 
 from app.agents.graph import get_graph
 from app.db.crud import (
+    get_prospect_cards,
     get_latest_variants_for_session,
     list_campaigns,
     load_campaign_state,
     save_campaign_state,
+    save_prospect_cards,
 )
 
 logger = logging.getLogger(__name__)
@@ -580,12 +582,149 @@ async def _run_graph_for_message(
     await websocket.send_json({"type": "token_end"})
 
 
+async def _sync_prospect_manager_ui_action(
+    session_id: str,
+    action_id: str,
+    payload: dict[str, Any],
+) -> bool:
+    """Persist Prospect Manager UI actions before any graph refresh.
+
+    Some Prospect Manager buttons mutate the prospect list directly from the UI.
+    Those actions need to update both the stored campaign snapshot and the graph
+    checkpoint; otherwise the rerendered frame falls back to stale prospect data.
+    """
+    supported_actions = {
+        "add_prospect_manual",
+        "remove_selected",
+        "select_all_prospects",
+        "clear_selection",
+        "csv_upload_complete",
+    }
+    if action_id not in supported_actions:
+        return False
+
+    base_state = await load_campaign_state(session_id)
+    if base_state is None:
+        return False
+
+    graph = _get_or_init_graph()
+    config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+    graph_values: dict[str, Any] = {}
+    try:
+        snapshot = await graph.aget_state(config)  # type: ignore[arg-type]
+        if snapshot and snapshot.values:
+            graph_values = dict(snapshot.values)
+    except Exception:
+        logger.warning(
+            "Could not load graph state before prospect UI action | session=%s action=%s",
+            session_id,
+            action_id,
+            exc_info=True,
+        )
+
+    persisted_cards = await get_prospect_cards(session_id)
+    if persisted_cards:
+        raw_cards = list(persisted_cards)
+    elif graph_values.get("prospect_cards") is not None:
+        raw_cards = list(graph_values.get("prospect_cards") or [])
+    else:
+        raw_cards = list(base_state.get("prospect_cards") or [])
+
+    if graph_values.get("selected_prospect_ids") is not None:
+        selected_ids = list(graph_values.get("selected_prospect_ids") or [])
+    else:
+        selected_ids = list(base_state.get("selected_prospect_ids") or [])
+    selected_ids = [str(prospect_id) for prospect_id in selected_ids if prospect_id]
+
+    cards_changed = False
+
+    if action_id == "add_prospect_manual":
+        from app.agents.prospect_manager import _create_manual_prospect
+
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            raise ValueError("Name is required")
+
+        manual_prospect = _create_manual_prospect(
+            {
+                "name": name,
+                "email": payload.get("email"),
+                "title": payload.get("title"),
+                "company": payload.get("company"),
+                "linkedin_url": payload.get("linkedin_url"),
+            }
+        )
+        raw_cards.append(manual_prospect)
+        selected_ids = list(dict.fromkeys([*selected_ids, manual_prospect["id"]]))
+        cards_changed = True
+
+    elif action_id == "remove_selected":
+        ids_to_remove = {
+            str(prospect_id)
+            for prospect_id in (payload.get("prospect_ids") or [])
+            if prospect_id
+        }
+        if ids_to_remove:
+            raw_cards = [
+                card for card in raw_cards if str(card.get("id")) not in ids_to_remove
+            ]
+            selected_ids = [
+                prospect_id
+                for prospect_id in selected_ids
+                if prospect_id not in ids_to_remove
+            ]
+            cards_changed = True
+
+    elif action_id == "select_all_prospects":
+        selected_ids = [str(card.get("id")) for card in raw_cards if card.get("id")]
+
+    elif action_id == "clear_selection":
+        selected_ids = []
+
+    # csv_upload_complete is a sync-only action: the upload endpoint already
+    # persisted the imported rows, we just need the graph checkpoint to match.
+
+    valid_ids = {str(card.get("id")) for card in raw_cards if card.get("id")}
+    selected_ids = [prospect_id for prospect_id in selected_ids if prospect_id in valid_ids]
+
+    from app.agents.prospect_manager import _build_prospect_card
+
+    ui_cards = [_build_prospect_card(card) for card in raw_cards]
+
+    if cards_changed:
+        await save_prospect_cards(session_id, raw_cards)
+
+    base_state["prospect_cards"] = ui_cards
+    base_state["selected_prospect_ids"] = selected_ids
+    await save_campaign_state(session_id, base_state)
+
+    try:
+        await graph.aupdate_state(  # type: ignore[arg-type]
+            config,
+            {
+                "prospect_cards": ui_cards,
+                "selected_prospect_ids": selected_ids,
+            },
+        )
+    except Exception:
+        logger.warning(
+            "Could not patch graph state for prospect UI action | session=%s action=%s",
+            session_id,
+            action_id,
+            exc_info=True,
+        )
+
+    return True
+
+
 async def _apply_ui_action(
     session_id: str,
     action_id: str,
     payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Apply a UI action to the graph state. Returns response frames."""
+    await _sync_prospect_manager_ui_action(session_id, action_id, payload)
+
     delta = _state_delta_for_action(action_id, payload)
     if delta:
         graph = _get_or_init_graph()
@@ -641,13 +780,14 @@ async def post_ui_action(session_id: str, action: UIActionRequest) -> dict[str, 
     """Process a UI action via REST (fallback for clients that can't maintain WS)."""
     state = await load_campaign_state(session_id)
     if state is None:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Session not found")
 
-    frames = await _apply_ui_action(
-        session_id, _normalize_action_id(action.action_id), action.payload
-    )
+    try:
+        frames = await _apply_ui_action(
+            session_id, _normalize_action_id(action.action_id), action.payload
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"frames": frames}
 
 
@@ -820,6 +960,12 @@ async def websocket_campaign(websocket: WebSocket, session_id: str) -> None:
                         action_id,
                         synthetic_msg,
                     )
+                    try:
+                        await _sync_prospect_manager_ui_action(session_id, action_id, payload)
+                    except ValueError as exc:
+                        await websocket.send_json({"type": "error", "message": str(exc)})
+                        await _send_json_safe(websocket, {"type": "token_end"})
+                        continue
                     # Patch state before re-running (e.g. selected_variant_ids).
                     # Note: deployment_confirmed is intentionally NOT included here —
                     # it is passed directly via _run_graph_for_message to avoid it

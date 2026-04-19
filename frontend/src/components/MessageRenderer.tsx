@@ -21,6 +21,10 @@ import {
   QuarantineViewer,
 } from "./stubs";
 import VisualArtifact from "./VisualArtifact";
+import LinkedInPostComposer from "./LinkedInPostComposer";
+import LinkedInPostConfirm from "./LinkedInPostConfirm";
+import LinkedInPostPublished from "./LinkedInPostPublished";
+import LinkedInCommentReview from "./LinkedInCommentReview";
 
 // ---------------------------------------------------------------------------
 // Reasoning JSON detector & structured types
@@ -258,6 +262,14 @@ function UIComponentDispatcher({ frame, onAction }: DispatcherProps) {
       return <QuarantineViewer {...props} />;
     case "ErrorCard":
       return <ErrorCard {...props} />;
+    case "LinkedInPostComposer":
+      return <LinkedInPostComposer {...props} />;
+    case "LinkedInPostConfirm":
+      return <LinkedInPostConfirm {...props} />;
+    case "LinkedInPostPublished":
+      return <LinkedInPostPublished {...props} />;
+    case "LinkedInCommentReview":
+      return <LinkedInCommentReview {...props} />;
     default:
       return (
         <pre
