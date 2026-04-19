@@ -25,6 +25,7 @@ from app.agents.deployment_agent import (
     personalize_variant,
     personalize_variant_html,
     send_via_email,
+    send_via_linkedin,
 )
 
 # ---------------------------------------------------------------------------
@@ -585,6 +586,42 @@ class TestRealSendDispatch:
         assert records[0]["provider_message_id"] == "resend-real-id-001"
         assert records[0]["status"] == "sent"
 
+    async def test_uses_unipile_when_use_mock_send_false_for_linkedin(self):
+        """With USE_MOCK_SEND=False the real Unipile path is used for LinkedIn."""
+        variant = _make_variants(1)[0] | {"intended_channel": "linkedin"}
+        prospect = {
+            "id": "prospect-1",
+            "name": "Person1 Last1",
+            "company": "Company1",
+            "linkedin_url": "https://www.linkedin.com/in/person1",
+        }
+        state = _make_state(
+            deployment_confirmed=True,
+            content_variants=[variant],
+            selected_variant_ids=["var-1"],
+            prospect_cards=[prospect],
+            selected_prospect_ids=["prospect-1"],
+        )
+        with (
+            patch("app.agents.deployment_agent.settings") as mock_settings,
+            patch(
+                "app.agents.deployment_agent.save_deployment_record",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.deployment_agent.send_via_linkedin",
+                new_callable=AsyncMock,
+                return_value="unipile-msg-001",
+            ),
+        ):
+            mock_settings.USE_MOCK_SEND = False
+            result = await deployment_agent_node(state)
+
+        records = result["deployment_records"]
+        assert records[0]["provider"] == "unipile"
+        assert records[0]["provider_message_id"] == "unipile-msg-001"
+        assert records[0]["status"] == "sent"
+
 
 # ---------------------------------------------------------------------------
 # Failed send handling
@@ -751,6 +788,35 @@ class TestCheckProductionReadiness:
             mock_settings.PHYSICAL_ADDRESS = ""
             errors = check_production_readiness()
         assert len(errors) == 3
+
+    def test_linkedin_channel_requires_unipile_config(self):
+        with patch("app.agents.deployment_agent.settings") as mock_settings:
+            mock_settings.UNIPILE_DSN = ""
+            mock_settings.UNIPILE_API_KEY = ""
+            mock_settings.UNIPILE_LINKEDIN_ACCOUNT_ID = ""
+            errors = check_production_readiness({"linkedin"})
+        assert any("UNIPILE_DSN" in e for e in errors)
+        assert any("UNIPILE_API_KEY" in e for e in errors)
+        assert any("UNIPILE_LINKEDIN_ACCOUNT_ID" in e for e in errors)
+
+
+class TestLinkedInSendHelper:
+    async def test_send_via_linkedin_uses_unipile_client(self):
+        variant = {"body": "Hi {{first_name}} from {{company}}"}
+        prospect = {
+            "name": "Jane Doe",
+            "company": "Acme",
+            "linkedin_url": "https://www.linkedin.com/in/jane-doe",
+        }
+        with patch(
+            "app.agents.deployment_agent.send_linkedin_message",
+            new_callable=AsyncMock,
+            return_value={"provider_message_id": "msg-123"},
+        ) as send_mock:
+            provider_message_id = await send_via_linkedin(variant, prospect)
+
+        assert provider_message_id == "msg-123"
+        send_mock.assert_awaited_once()
 
 
 class TestProductionModePreFlight:

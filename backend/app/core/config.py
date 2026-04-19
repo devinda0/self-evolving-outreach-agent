@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     WEBHOOK_DLQ_MAX_RETRIES: int = 3  # max retry attempts for failed webhook processing
 
     # LinkedIn deployment
+    UNIPILE_DSN: str = ""
     UNIPILE_API_KEY: str = ""
     UNIPILE_LINKEDIN_ACCOUNT_ID: str = ""
 

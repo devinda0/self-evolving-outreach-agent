@@ -24,6 +24,7 @@ from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import DeploymentRecord, EmailThread, EmailThreadMessage
 from app.models.ui_frames import UIAction, UIFrame
+from app.tools.unipile_client import send_linkedin_message
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +93,42 @@ def personalize_variant_html(variant: dict, prospect: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def check_production_readiness() -> list[str]:
+def check_production_readiness(channels: set[str] | None = None) -> list[str]:
     """Validate config required for real email sends.
 
     Returns a list of human-readable error strings. Empty list means production
     mode is safe to use.
     """
     errors: list[str] = []
-    if not settings.RESEND_API_KEY:
-        errors.append("RESEND_API_KEY is not set — cannot send real emails.")
-    if (
-        not settings.RESEND_FROM_EMAIL
-        or settings.RESEND_FROM_EMAIL == "outreach@yourdomain.com"
-    ):
-        errors.append(
-            "RESEND_FROM_EMAIL is still the default placeholder — set a verified sender address."
-        )
-    if not settings.UNSUBSCRIBE_URL:
-        logger.warning("UNSUBSCRIBE_URL is not configured — recommended for CAN-SPAM compliance.")
-    if not settings.PHYSICAL_ADDRESS:
-        errors.append("PHYSICAL_ADDRESS is not configured — required for CAN-SPAM compliance.")
+    requested_channels = channels or {"email"}
+
+    if "email" in requested_channels:
+        if not settings.RESEND_API_KEY:
+            errors.append("RESEND_API_KEY is not set — cannot send real emails.")
+        if (
+            not settings.RESEND_FROM_EMAIL
+            or settings.RESEND_FROM_EMAIL == "outreach@yourdomain.com"
+        ):
+            errors.append(
+                "RESEND_FROM_EMAIL is still the default placeholder — set a verified sender address."
+            )
+        if not settings.UNSUBSCRIBE_URL:
+            logger.warning(
+                "UNSUBSCRIBE_URL is not configured — recommended for CAN-SPAM compliance."
+            )
+        if not settings.PHYSICAL_ADDRESS:
+            errors.append("PHYSICAL_ADDRESS is not configured — required for CAN-SPAM compliance.")
+
+    if "linkedin" in requested_channels:
+        if not settings.UNIPILE_DSN:
+            errors.append("UNIPILE_DSN is not set — cannot reach the Unipile API.")
+        if not settings.UNIPILE_API_KEY:
+            errors.append("UNIPILE_API_KEY is not set — cannot authenticate to Unipile.")
+        if not settings.UNIPILE_LINKEDIN_ACCOUNT_ID:
+            errors.append(
+                "UNIPILE_LINKEDIN_ACCOUNT_ID is not set — cannot target the connected LinkedIn account."
+            )
+
     return errors
 
 
@@ -149,6 +166,20 @@ async def send_via_email(variant: dict, prospect: dict, session_id: str) -> str:
     )
 
 
+async def send_via_linkedin(variant: dict, prospect: dict) -> str:
+    """Send a real LinkedIn DM through Unipile."""
+    linkedin_url = prospect.get("linkedin_url")
+    if not linkedin_url:
+        raise ValueError("No LinkedIn profile URL found for prospect.")
+
+    rendered_text = personalize_variant(variant, prospect)
+    result = await send_linkedin_message(
+        recipient_profile_reference=linkedin_url,
+        message=rendered_text,
+    )
+    return result["provider_message_id"]
+
+
 async def _dispatch_send(
     channel: str,
     variant: dict,
@@ -161,27 +192,40 @@ async def _dispatch_send(
     ``error_detail`` is ``None``; on failure ``provider_message_id`` is
     ``None``.
     """
-    if settings.USE_MOCK_SEND or channel != "email":
+    if settings.USE_MOCK_SEND:
         msg_id = await mock_send(channel, prospect, personalize_variant(variant, prospect))
         return msg_id, None
 
-    if not prospect.get("email"):
-        return None, "No email address found for prospect, but intended channel is email."
-
     try:
-        msg_id = await send_via_email(variant, prospect, session_id)
-        return msg_id, None
+        if channel == "email":
+            if not prospect.get("email"):
+                return None, "No email address found for prospect, but intended channel is email."
+            msg_id = await send_via_email(variant, prospect, session_id)
+            return msg_id, None
+
+        if channel == "linkedin":
+            if not prospect.get("linkedin_url"):
+                return None, (
+                    "No LinkedIn profile URL found for prospect, but intended channel is linkedin."
+                )
+            msg_id = await send_via_linkedin(variant, prospect)
+            return msg_id, None
+
+        return None, f"Unsupported outbound channel '{channel}'."
+
     except httpx.HTTPStatusError as exc:
         logger.error(
-            "_dispatch_send Resend HTTP error prospect=%s status=%s",
+            "_dispatch_send provider HTTP error prospect=%s channel=%s status=%s",
             prospect.get("id"),
+            channel,
             exc.response.status_code,
         )
         return None, str(exc)
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "_dispatch_send unexpected error prospect=%s: %s",
+            "_dispatch_send unexpected error prospect=%s channel=%s: %s",
             prospect.get("id"),
+            channel,
             exc,
         )
         return None, str(exc)
@@ -429,7 +473,10 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         # Pre-flight: warn if production mode is misconfigured
         production_errors: list[str] = []
         if not settings.USE_MOCK_SEND:
-            production_errors = check_production_readiness()
+            requested_channels = {
+                (variant.get("intended_channel") or "email") for variant in selected_variants
+            }
+            production_errors = check_production_readiness(requested_channels)
             if production_errors:
                 logger.error(
                     "deployment_agent_node: production readiness check failed | session=%s errors=%s",
@@ -532,7 +579,14 @@ async def deployment_agent_node(state: CampaignState) -> dict:
             session_id=session_id,
         )
         send_status: Literal["sent", "failed"] = "failed" if error_detail else "sent"
-        provider = "resend" if not settings.USE_MOCK_SEND and channel == "email" else "mock"
+        if settings.USE_MOCK_SEND:
+            provider = "mock"
+        elif channel == "email":
+            provider = "resend"
+        elif channel == "linkedin":
+            provider = "unipile"
+        else:
+            provider = "unknown"
 
         # Create deployment record
         record = DeploymentRecord(
