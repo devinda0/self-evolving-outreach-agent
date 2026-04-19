@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 from app.agents.graph import get_graph
 from app.db.crud import (
-    get_prospect_cards,
     get_latest_variants_for_session,
+    get_prospect_cards,
     list_campaigns,
     load_campaign_state,
     save_campaign_state,

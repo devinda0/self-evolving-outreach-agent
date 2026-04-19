@@ -25,7 +25,7 @@ _TIMEOUT_SECONDS = 20.0
 _LINKEDIN_IDENTIFIER_RE = re.compile(r"linkedin\.com/(?:in|company)/([^/?#]+)", re.IGNORECASE)
 
 
-class LinkedInConnectionRequired(Exception):
+class LinkedInConnectionRequiredError(Exception):
     """Raised when a LinkedIn message send fails because the recipient is not connected.
 
     Carries the provider_id and public_identifier so the caller can send a
@@ -245,7 +245,7 @@ async def send_linkedin_message(
         chat = await _request("POST", "/api/v1/chats", files=files)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 403:
-            raise LinkedInConnectionRequired(
+            raise LinkedInConnectionRequiredError(
                 provider_id=provider_id,
                 public_identifier=profile.get("public_identifier") or identifier,
             ) from exc

@@ -1261,11 +1261,11 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
     context_parts = [p for p in [company_hint, role_hint] if p]
     context_str = " ".join(context_parts)
 
+    from app.core.config import settings as _settings
     from app.tools.unipile_client import (
         get_unipile_config_errors,
         search_linkedin_people,
     )
-    from app.core.config import settings as _settings
 
     # Step 3a: PRIMARY — Unipile authenticated LinkedIn search (best quality)
     unipile_profiles: list[dict] = []

@@ -24,7 +24,10 @@ from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import DeploymentRecord, EmailThread, EmailThreadMessage
 from app.models.ui_frames import UIAction, UIFrame
-from app.tools.unipile_client import LinkedInConnectionRequired, send_linkedin_message
+from app.tools.unipile_client import (
+    LinkedInConnectionRequiredError,
+    send_linkedin_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +275,7 @@ async def _dispatch_send(
 
         return None, f"Unsupported outbound channel '{channel}'.", False
 
-    except LinkedInConnectionRequired as exc:
+    except LinkedInConnectionRequiredError as exc:
         return await _handle_connection_required(exc, variant, prospect, session_id)
 
     except httpx.HTTPStatusError as exc:
@@ -302,11 +305,11 @@ async def _dispatch_send(
 
 
 async def _handle_connection_required(
-    exc: LinkedInConnectionRequired,
+    exc: LinkedInConnectionRequiredError,
     variant: dict,
     prospect: dict,
     session_id: str,
-) -> tuple[None, None, bool]:
+) -> tuple[None, str | None, bool]:
     """Send a LinkedIn connection request and store the deferred message.
 
     Returns the connection_pending 3-tuple on success, or the failure 3-tuple
