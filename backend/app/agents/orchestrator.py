@@ -1474,6 +1474,19 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
         state_update["prospect_cards"] = existing_cards
         state_update["selected_prospect_ids"] = existing_selected
 
+        # Also persist to the dedicated prospect_cards MongoDB collection so the
+        # deployment agent's DB fallback (get_prospect_cards) can find the linkedin_url.
+        try:
+            from app.db.crud import save_prospect_cards
+            await save_prospect_cards(session_id, existing_cards)
+            logger.info(
+                "lookup_node: persisted %d prospect cards to DB | session=%s",
+                len(existing_cards),
+                session_id,
+            )
+        except Exception as _exc:
+            logger.warning("lookup_node: save_prospect_cards failed: %s", _exc)
+
     logger.info(
         "lookup_node completed | session=%s person=%r found=%s confidence=%s linkedin=%r",
         session_id, person_name, found, confidence, linkedin_url,

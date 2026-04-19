@@ -233,7 +233,10 @@ def _state_delta_for_action(action_id: str, payload: dict[str, Any]) -> dict[str
     if action_id == "select_segment":
         return {"selected_segment_id": payload.get("segment_id")}
     if action_id == "confirm_prospects":
-        return {"selected_prospect_ids": payload.get("selected_ids", [])}
+        selected = payload.get("selected_ids")
+        if selected is not None:
+            return {"selected_prospect_ids": selected}
+        return {}
     if action_id == "navigate":
         return {"next_node": payload.get("target_intent")}
     return {}
@@ -351,7 +354,13 @@ def _state_delta_before_rerun(action_id: str, payload: dict[str, Any]) -> dict[s
     if action_id in ("deploy_selected", "confirm_selected", "confirm_variants"):
         return {"selected_variant_ids": payload.get("variant_ids", [])}
     if action_id == "confirm_prospects":
-        return {"selected_prospect_ids": payload.get("selected_ids", [])}
+        # Only overwrite selected_prospect_ids if the payload explicitly includes them.
+        # An empty payload {} (e.g. from lookup's ProspectManager) must NOT clear
+        # the IDs that lookup_node already wrote to state.
+        selected = payload.get("selected_ids")
+        if selected is not None:
+            return {"selected_prospect_ids": selected}
+        return {}
     if action_id in ("select_all_prospects",):
         return {}  # handled by graph re-run
     if action_id in ("clear_selection",):
