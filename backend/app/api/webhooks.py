@@ -124,10 +124,23 @@ _UNIPILE_EVENT_MAP: dict[str, str] = {
     "message.failed": "bounce",
 }
 
-# Unipile event types that signal a LinkedIn connection was accepted
-_CONNECTION_ACCEPTED_TYPES: frozenset[str] = frozenset(
-    {"new_connection", "connection.accepted", "connection_accepted"}
-)
+# Unipile event types that signal a LinkedIn connection was accepted.
+# The exact type varies by Unipile version/webhook category — we cast a wide net
+# and log the raw type so we can narrow it down from real traffic.
+_CONNECTION_ACCEPTED_TYPES: frozenset[str] = frozenset({
+    "new_connection",
+    "connection.accepted",
+    "connection_accepted",
+    "new_relation",
+    "relation.accepted",
+    "relation.new",
+    "user.new_relation",
+    "user.relation.accepted",
+    "invitation.accepted",
+    "connection.new",
+    "RELATION_CREATED",
+    "relation_created",
+})
 
 
 def _map_unipile_event_type(unipile_type: str) -> str:
@@ -259,6 +272,11 @@ async def webhook_unipile(request: Request) -> dict[str, str]:
     payload: dict[str, Any] = await request.json()
 
     raw_type = payload.get("type", "unknown")
+    logger.info(
+        "webhook_unipile: received event type=%s payload_keys=%s",
+        raw_type,
+        list(payload.keys()),
+    )
 
     # Connection-accepted events are handled separately — they trigger a deferred message send.
     if raw_type in _CONNECTION_ACCEPTED_TYPES:

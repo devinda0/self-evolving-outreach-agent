@@ -252,12 +252,30 @@ async def _handle_connection_required(
     Returns the connection_pending 3-tuple on success, or the failure 3-tuple
     if the connection request itself also fails.
     """
-    from app.db.crud import save_pending_linkedin_message
+    from app.db.crud import (
+        get_pending_linkedin_message_by_prospect_provider_id,
+        save_pending_linkedin_message,
+    )
     from app.tools.unipile_client import send_connection_request
 
     account_id = settings.UNIPILE_LINKEDIN_ACCOUNT_ID or ""
     try:
-        await send_connection_request(exc.provider_id, account_id=account_id)
+        # Only send a new connection request if one isn't already pending
+        already_pending = await get_pending_linkedin_message_by_prospect_provider_id(exc.provider_id)
+        if not already_pending:
+            await send_connection_request(exc.provider_id, account_id=account_id)
+            logger.info(
+                "_handle_connection_required: connection request sent | prospect=%s provider_id=%s",
+                prospect.get("id"),
+                exc.provider_id,
+            )
+        else:
+            logger.info(
+                "_handle_connection_required: connection already pending, skipping re-invite | "
+                "prospect=%s provider_id=%s",
+                prospect.get("id"),
+                exc.provider_id,
+            )
 
         pending = {
             "id": str(uuid4()),
@@ -270,10 +288,8 @@ async def _handle_connection_required(
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await save_pending_linkedin_message(pending)
-
         logger.info(
-            "_handle_connection_required: connection request sent, message deferred | "
-            "prospect=%s provider_id=%s",
+            "_handle_connection_required: message deferred | prospect=%s provider_id=%s",
             prospect.get("id"),
             exc.provider_id,
         )

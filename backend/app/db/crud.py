@@ -711,9 +711,18 @@ async def delete_mcp_server(server_id: str) -> bool:
 
 
 async def save_pending_linkedin_message(msg: dict[str, Any]) -> None:
-    """Store a LinkedIn message deferred until the connection request is accepted."""
+    """Upsert a LinkedIn message deferred until the connection request is accepted.
+
+    Keyed on prospect_provider_id so retries overwrite the existing record
+    rather than hitting the unique-index duplicate-key error.
+    """
     db = get_db()
-    await db[PENDING_LINKEDIN_MESSAGES].insert_one({**msg})
+    await db[PENDING_LINKEDIN_MESSAGES].find_one_and_update(
+        {"prospect_provider_id": msg["prospect_provider_id"]},
+        {"$set": {**msg}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
 
 
 async def get_pending_linkedin_message_by_prospect_provider_id(

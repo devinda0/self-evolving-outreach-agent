@@ -263,7 +263,13 @@ async def send_linkedin_message(
             provider_message_id = items[0].get("message_id") or items[0].get("provider_id")
 
     if not provider_message_id:
-        raise ValueError("Unipile returned no provider message id for the sent LinkedIn DM.")
+        # Message was sent (no HTTP error) but Unipile didn't return a message ID.
+        # Fall back to the chat ID so the deployment record is still marked sent.
+        provider_message_id = chat.get("id") or f"linkedin-{provider_id[:12]}"
+        logger.warning(
+            "send_linkedin_message: no message_id in response — using fallback id=%s",
+            provider_message_id,
+        )
 
     return {
         "provider_message_id": provider_message_id,
@@ -328,7 +334,11 @@ async def send_linkedin_message_direct(
             provider_message_id = items[0].get("message_id") or items[0].get("provider_id")
 
     if not provider_message_id:
-        raise ValueError("Unipile returned no provider message id for the sent LinkedIn DM.")
+        provider_message_id = chat.get("id") or f"linkedin-{provider_id[:12]}"
+        logger.warning(
+            "send_linkedin_message_direct: no message_id in response — using fallback id=%s",
+            provider_message_id,
+        )
 
     return {"provider_message_id": provider_message_id, "chat_id": chat.get("id")}
 
