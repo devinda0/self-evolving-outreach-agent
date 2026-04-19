@@ -78,6 +78,8 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
       onAction(frame.instance_id, id, {
         ...(confirmAction?.payload ?? {}),
         action: "confirm_linkedin_post",
+        caption,
+        html,
         flyer_image_data_url: flyerImageDataUrl,
       });
     } catch {

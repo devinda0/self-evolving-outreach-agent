@@ -1,5 +1,6 @@
 """Campaign API — WebSocket endpoint and REST session management."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -484,25 +485,11 @@ async def _handle_confirm_linkedin_post_action(
     db_state: dict[str, Any],
 ) -> None:
     """Publish a LinkedIn post directly, without checkpointing the inline flyer image."""
-    graph = _get_or_init_graph()
-    config: RunnableConfig = {"configurable": {"thread_id": session_id}}
-
-    state_values: dict[str, Any] = {}
-    try:
-        state_snap = await graph.aget_state(config)  # type: ignore[arg-type]
-        if state_snap and state_snap.values:
-            state_values = dict(state_snap.values)
-    except Exception:
-        logger.warning(
-            "Could not load graph state before LinkedIn publish | session=%s",
-            session_id,
-            exc_info=True,
-        )
-
     publish_state = {
         **db_state,
-        **state_values,
         "session_id": session_id,
+        "linkedin_post_caption": payload.get("caption") or db_state.get("linkedin_post_caption") or "",
+        "linkedin_post_html": payload.get("html") or db_state.get("linkedin_post_html") or "",
         "linkedin_post_confirmed": True,
         "linkedin_post_image_data_url": payload.get("flyer_image_data_url"),
     }
@@ -526,21 +513,26 @@ async def _handle_confirm_linkedin_post_action(
             "error_messages",
         }
     }
-    if persisted_delta:
-        try:
-            await graph.aupdate_state(config, persisted_delta)  # type: ignore[arg-type]
-        except Exception:
-            logger.warning(
-                "Could not persist LinkedIn publish result | session=%s",
-                session_id,
-                exc_info=True,
-            )
-
     for frame in result.get("pending_ui_frames", []):
         await _send_json_safe(websocket, frame)
     for err in result.get("error_messages", []):
         await _send_json_safe(websocket, {"type": "error", "message": str(err)})
     await _send_json_safe(websocket, {"type": "token_end"})
+
+    if persisted_delta:
+        async def _persist() -> None:
+            graph = _get_or_init_graph()
+            config: RunnableConfig = {"configurable": {"thread_id": session_id}}
+            try:
+                await graph.aupdate_state(config, persisted_delta)  # type: ignore[arg-type]
+            except Exception:
+                logger.warning(
+                    "Could not persist LinkedIn publish result | session=%s",
+                    session_id,
+                    exc_info=True,
+                )
+
+        asyncio.create_task(_persist())
 
 
 # ---------------------------------------------------------------------------
