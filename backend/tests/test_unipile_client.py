@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.api.health import router as health_router
 from app.tools.unipile_client import (
+    create_linkedin_post,
     extract_linkedin_identifier,
     get_unipile_base_url,
     get_unipile_connection_health,
@@ -87,6 +88,26 @@ async def test_send_linkedin_message_resolves_profile_before_starting_chat():
     assert result["provider_message_id"] == "msg-1"
     assert request_mock.await_args_list[0].args[:2] == ("GET", "/api/v1/users/jane-doe")
     assert request_mock.await_args_list[1].args[:2] == ("POST", "/api/v1/chats")
+
+
+async def test_create_linkedin_post_uses_multipart_form_payload():
+    with patch(
+        "app.tools.unipile_client._request",
+        new_callable=AsyncMock,
+        return_value={"id": "post-1"},
+    ) as request_mock, patch("app.tools.unipile_client.settings") as mock_settings:
+        mock_settings.UNIPILE_DSN = "api34.unipile.com:16477"
+        mock_settings.UNIPILE_API_KEY = "secret"
+        mock_settings.UNIPILE_LINKEDIN_ACCOUNT_ID = "acc-1"
+
+        result = await create_linkedin_post("Hello LinkedIn")
+
+    assert result["id"] == "post-1"
+    assert request_mock.await_args.args[:2] == ("POST", "/api/v1/posts")
+    assert request_mock.await_args.kwargs["files"] == [
+        ("account_id", (None, "acc-1")),
+        ("text", (None, "Hello LinkedIn")),
+    ]
 
 
 def test_health_unipile_route_returns_probe_result():

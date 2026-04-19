@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+import httpx
+
 from app.core.config import settings
 from app.core.llm import get_llm
 from app.models.campaign_state import CampaignState
@@ -229,6 +231,29 @@ def _mock_html() -> str:
         'border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:0.3px;">'
         'See How It Works →</a></div>'
     )
+
+
+def _format_http_error(exc: Exception) -> str:
+    """Extract a concise, user-visible error from an HTTP exception."""
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return str(exc)
+
+    status = exc.response.status_code
+    detail = ""
+    try:
+        payload = exc.response.json()
+        if isinstance(payload, dict):
+            detail = (
+                str(payload.get("message") or payload.get("error") or payload.get("detail") or "")
+                .strip()
+            )
+        elif isinstance(payload, list):
+            detail = json.dumps(payload)[:300]
+    except Exception:
+        detail = exc.response.text.strip()
+
+    detail = " ".join(detail.split())[:300]
+    return f"HTTP {status}" + (f" — {detail}" if detail else "")
 
 
 # ---------------------------------------------------------------------------
@@ -572,8 +597,9 @@ async def _publish_post(state: CampaignState, session_id: str) -> dict:
             logger.error(
                 "_publish_post: Unipile publish failed | session=%s error=%s", session_id, exc
             )
+            error_detail = _format_http_error(exc)
             error_text = (
-                f"Failed to publish to LinkedIn: {exc}\n\n"
+                f"Failed to publish to LinkedIn: {error_detail}\n\n"
                 "The post was not sent. Check your Unipile credentials and try again."
             )
             return {

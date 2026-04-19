@@ -357,10 +357,14 @@ async def create_linkedin_post(
         raise ValueError(" | ".join(config_errors))
 
     resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    files = [
+        ("account_id", (None, resolved_account_id)),
+        ("text", (None, text)),
+    ]
     return await _request(
         "POST",
         "/api/v1/posts",
-        json_body={"account_id": resolved_account_id, "text": text},
+        files=files,
     )
 
 
