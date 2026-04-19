@@ -34,8 +34,55 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def build_ab_split_plan(variants: list[dict], prospects: list[dict]) -> dict:
-    """Assign each prospect to a variant cohort (round-robin).
+def _pick_channel_variants(
+    prospect: dict,
+    email_variants: list[dict],
+    linkedin_variants: list[dict],
+    mock_mode: bool,
+) -> list[dict]:
+    """Return the variant pool this prospect should receive based on their contact info.
+
+    In mock mode (no real contact data), channel_recommendation is used as proxy.
+    In production mode, actual email / linkedin_url presence determines the channel.
+    Returns an empty list when no compatible variants exist for this prospect.
+    """
+    rec = prospect.get("channel_recommendation", "email")
+
+    if mock_mode:
+        if rec == "linkedin" and linkedin_variants:
+            return linkedin_variants
+        return email_variants or linkedin_variants
+
+    has_email = bool(prospect.get("email"))
+    has_linkedin = bool(prospect.get("linkedin_url"))
+
+    if has_email and has_linkedin:
+        # Both channels available — honour recommendation, fall back to whichever has variants
+        if rec == "linkedin" and linkedin_variants:
+            return linkedin_variants
+        return email_variants or linkedin_variants
+    elif has_email:
+        return email_variants  # empty → prospect is skipped (no email variants)
+    elif has_linkedin:
+        return linkedin_variants  # empty → prospect is skipped (no LinkedIn variants)
+    else:
+        # No contact info yet (e.g. not yet enriched) — use recommendation as hint
+        if rec == "linkedin" and linkedin_variants:
+            return linkedin_variants
+        return email_variants or linkedin_variants
+
+
+def build_ab_split_plan(
+    variants: list[dict],
+    prospects: list[dict],
+    *,
+    mock_mode: bool = False,
+) -> dict:
+    """Channel-aware A/B split: route each prospect to a compatible variant cohort.
+
+    Email variants go only to prospects with email addresses; LinkedIn variants go
+    only to prospects with linkedin_url (or matching channel_recommendation in mock mode).
+    Round-robin is applied within each channel's variant pool independently.
 
     Returns a dict with:
     - assignments: list of {variant, prospect, cohort} mappings
@@ -45,11 +92,24 @@ def build_ab_split_plan(variants: list[dict], prospects: list[dict]) -> dict:
     if not variants or not prospects:
         return {"assignments": [], "variant_count": len(variants), "prospect_count": len(prospects)}
 
+    email_variants = [v for v in variants if (v.get("intended_channel") or "email") == "email"]
+    linkedin_variants = [v for v in variants if (v.get("intended_channel") or "email") == "linkedin"]
+
     assignments = []
-    for i, prospect in enumerate(prospects):
-        variant = variants[i % len(variants)]
-        cohort = chr(65 + (i % len(variants)))  # A, B, C...
+    counters: dict[str, int] = {"email": 0, "linkedin": 0}
+
+    for prospect in prospects:
+        pool = _pick_channel_variants(prospect, email_variants, linkedin_variants, mock_mode)
+        if not pool:
+            continue
+
+        channel = pool[0].get("intended_channel") or "email"
+        idx = counters[channel]
+        variant = pool[idx % len(pool)]
+        cohort = chr(65 + idx % len(pool))
+        counters[channel] += 1
         assignments.append({"variant": variant, "prospect": prospect, "cohort": cohort})
+
     return {
         "assignments": assignments,
         "variant_count": len(variants),
@@ -652,7 +712,9 @@ async def deployment_agent_node(state: CampaignState) -> dict:
                     ],
                 }
 
-        ab_plan = build_ab_split_plan(selected_variants, selected_prospects)
+        ab_plan = build_ab_split_plan(
+            selected_variants, selected_prospects, mock_mode=settings.USE_MOCK_SEND
+        )
         confirm_frame = build_deployment_confirm_frame(
             selected_variants,
             selected_prospects,
@@ -700,7 +762,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
 
     # -- Confirmed: execute deployment --
     ab_plan = state.get("ab_split_plan") or build_ab_split_plan(
-        selected_variants, selected_prospects
+        selected_variants, selected_prospects, mock_mode=settings.USE_MOCK_SEND
     )
     segment_id = state.get("selected_segment_id") or "seg-unknown"
 

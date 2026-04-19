@@ -185,6 +185,10 @@ Rules:
 - hypothesis format: "Leading with [angle] will increase [metric] for [prospect_name] at [company]"
 - success_metric format: "<metric_name> > <threshold>%"
 - ab_group: assign each variant a letter starting from "A" (A, B, C...)
+- CHANNEL DISTRIBUTION: If selected_channels lists multiple channels (e.g. "email, linkedin"),
+  distribute the {variant_count} variants roughly equally across those channels. Every listed
+  channel MUST have at least one variant. Never generate all variants for a single channel
+  when multiple are listed.
 
 Output ONLY a valid JSON array of {variant_count} objects. No prose, no markdown fences.
 Each object:
@@ -376,6 +380,51 @@ _GENERALIZED_PROSPECT = {
     "channel_recommendation": "email",
 }
 
+_FLYER_KEYWORDS = frozenset([
+    "flyer", "visual", "banner", "image", "graphic", "poster",
+    "artwork", "ad creative", "creative asset", "linkedin post",
+    "social post", "feed post", "publish on linkedin",
+])
+
+
+def _user_wants_flyer(message: str) -> bool:
+    """Return True only when the user explicitly requests a visual/flyer asset."""
+    lower = message.lower()
+    return any(kw in lower for kw in _FLYER_KEYWORDS)
+
+
+def _derive_channels_from_prospects(
+    all_prospects: list[dict],
+    selected_ids: list[str],
+    fallback_channels: list[str],
+) -> list[str]:
+    """Inspect selected prospects' actual contact info to decide which channels to generate for.
+
+    - If a prospect has an email      → include "email"
+    - If a prospect has a linkedin_url → include "linkedin"
+    - If neither is present yet        → fall back to the prospect's channel_recommendation
+
+    Returns the sorted list of required channels, or fallback_channels when no prospects.
+    """
+    if selected_ids:
+        target = [p for p in all_prospects if p.get("id") in set(selected_ids)]
+    else:
+        target = list(all_prospects)
+
+    if not target:
+        return fallback_channels or ["email"]
+
+    channels: set[str] = set()
+    for p in target:
+        if p.get("email"):
+            channels.add("email")
+        if p.get("linkedin_url"):
+            channels.add("linkedin")
+        if not p.get("email") and not p.get("linkedin_url"):
+            channels.add(p.get("channel_recommendation", "email"))
+
+    return sorted(channels) if channels else (fallback_channels or ["email"])
+
 
 def _get_selected_prospects(state: CampaignState) -> list[dict]:
     """Get the target prospects for content generation.
@@ -511,9 +560,11 @@ async def generate_variants(
     # Determine variant count based on prospects and channels
     effective_prospects = prospects or []
     if _has_real_prospect_targets(effective_prospects):
-        variant_count = min(len(effective_prospects), 5)
+        # One variant per prospect, but at least one per channel so every channel is covered
+        variant_count = max(min(len(effective_prospects), 5), len(selected_channels))
     else:
-        variant_count = min(len(selected_channels) + 1, 3)
+        # Generalized multi-recipient: 2 variants per channel so each channel gets A/B coverage
+        variant_count = min(max(len(selected_channels) * 2, 2), 6)
 
     # Ensure at least 2 variants for A/B testing
     variant_count = max(variant_count, 2)
@@ -1090,13 +1141,20 @@ async def content_clarify_node(state: CampaignState) -> dict:
     )
     segment_description = selected_segment.get("description", "") if selected_segment else ""
 
+    # Derive effective channels from actual prospects (same logic as generation)
+    effective_channels = _derive_channels_from_prospects(
+        all_prospects=state.get("prospect_cards", []),
+        selected_ids=state.get("selected_prospect_ids", []),
+        fallback_channels=state.get("selected_channels", ["email"]),
+    )
+
     # Run clarification analysis
     analysis = await _analyse_clarification_needs(
         product_name=state.get("product_name", "Unknown Product"),
         product_description=state.get("product_description", ""),
         segment_label=segment_label,
         segment_description=segment_description,
-        selected_channels=state.get("selected_channels", ["email"]),
+        selected_channels=effective_channels,
         briefing_summary=state.get("briefing_summary") or "",
         top_findings=top_findings,
         prospects=prospects,
@@ -1232,6 +1290,15 @@ async def content_generate_node(state: CampaignState) -> dict:
         last_user_message = gen_ctx.get("last_user_message", "")
         clarifications = gen_ctx.get("clarifications", [])
 
+    # Derive which channels are actually needed from the selected prospects' contact info.
+    # This overrides state.selected_channels so the LLM generates for the right channels
+    # (e.g. email-only prospects → email variants; mixed prospects → both channels).
+    effective_channels = _derive_channels_from_prospects(
+        all_prospects=state.get("prospect_cards", []),
+        selected_ids=state.get("selected_prospect_ids", []),
+        fallback_channels=state.get("selected_channels", ["email"]),
+    )
+
     # Generate variants
     variants = await generate_variants(
         product_name=state.get("product_name", "Unknown Product"),
@@ -1239,7 +1306,7 @@ async def content_generate_node(state: CampaignState) -> dict:
         briefing_summary=state.get("briefing_summary") or "",
         top_findings=top_findings,
         selected_segment=selected_segment,
-        selected_channels=state.get("selected_channels", ["email"]),
+        selected_channels=effective_channels,
         content_request=state.get("content_request"),
         winning_angle_memory=winning_angle_memory,
         session_id=session_id,
@@ -1249,16 +1316,19 @@ async def content_generate_node(state: CampaignState) -> dict:
         clarification_context=clarifications,
     )
 
-    # Generate visual artifact
+    # Generate visual artifact ONLY when the user explicitly asked for one.
+    # Flyers are for publishing on LinkedIn feed, not generated on every content run.
     segment_label = (
         selected_segment.get("label", "Target Audience") if selected_segment else "Target Audience"
     )
-    visual_artifact = await generate_visual_artifact(
-        product_name=state.get("product_name", "Unknown Product"),
-        segment_label=segment_label,
-        briefing_summary=state.get("briefing_summary") or "",
-        last_user_message=last_user_message,
-    )
+    visual_artifact = None
+    if _user_wants_flyer(last_user_message):
+        visual_artifact = await generate_visual_artifact(
+            product_name=state.get("product_name", "Unknown Product"),
+            segment_label=segment_label,
+            briefing_summary=state.get("briefing_summary") or "",
+            last_user_message=last_user_message,
+        )
 
     # Persist each variant to MongoDB
     for variant in variants:
@@ -1286,11 +1356,13 @@ async def content_generate_node(state: CampaignState) -> dict:
     if clarifications:
         clarification_note = f" Incorporated {len(clarifications)} clarification(s) you provided."
 
+    flyer_note = " A campaign flyer has also been generated below." if visual_artifact else ""
+
     response_message = (
         f"Content generation complete{directive_note}. "
         f"Created {len(variants)} A/B variant(s) across {', '.join(channels_used)}{personalization_note}. "
-        f"Angles: {', '.join(angles_used) if angles_used else 'various'}.{clarification_note} "
-        "Review the variants below -- you can refine them with additional prompts or deploy directly."
+        f"Angles: {', '.join(angles_used) if angles_used else 'various'}.{clarification_note}{flyer_note} "
+        "Review the variants below — you can refine them with additional prompts or deploy directly."
     )
     response_frame = UIFrame(
         type="text",
@@ -1304,21 +1376,23 @@ async def content_generate_node(state: CampaignState) -> dict:
     grid_frame = build_variant_grid_frame(variants, f"variant-grid-{session_id[:8]}")
     ui_frames.append(grid_frame)
 
-    visual_frame = build_visual_artifact_frame(
-        visual_artifact, f"visual-artifact-{session_id[:8]}"
-    )
-    ui_frames.append(visual_frame)
+    if visual_artifact:
+        visual_frame = build_visual_artifact_frame(
+            visual_artifact, f"visual-artifact-{session_id[:8]}"
+        )
+        ui_frames.append(visual_frame)
 
     logger.info(
-        "content_generate_node completed | session=%s variants=%d visual=%s",
+        "content_generate_node completed | session=%s variants=%d visual=%s channels=%s",
         session_id,
         len(variants),
-        visual_artifact.get("id"),
+        visual_artifact.get("id") if visual_artifact else "none",
+        effective_channels,
     )
 
     return {
         "content_variants": [v.model_dump(mode="json") for v in variants],
-        "visual_artifacts": [visual_artifact],
+        "visual_artifacts": [visual_artifact] if visual_artifact else [],
         "content_phase": "generated",
         "content_generation_context": None,  # Clear after generation
         "next_node": "orchestrator",
