@@ -1254,34 +1254,55 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
     context_parts = [p for p in [company_hint, role_hint] if p]
     context_str = " ".join(context_parts)
 
-    # Step 3: Run searches — no recency filter (LinkedIn profiles are evergreen)
-    all_results: list[dict] = []
+    from app.tools.unipile_client import (
+        get_unipile_config_errors,
+        search_linkedin_people,
+    )
+    from app.core.config import settings as _settings
 
-    # Primary: LinkedIn domain search with quoted name + context
-    primary_query = f"{quoted_name} {context_str}".strip() if context_str else quoted_name
-    try:
-        results = await search_web(
-            primary_query,
-            max_results=7,
-            recency_days=None,
-            include_domains=["linkedin.com"],
-        )
-        all_results.extend(results)
-        logger.info("lookup_node: linkedin domain search returned %d results for %r", len(results), primary_query)
-    except Exception as e:
-        logger.warning("lookup_node: linkedin domain search failed: %s", e)
-
-    # Fallback: broad search without domain filter
-    if len(all_results) < 3:
-        fallback_query = f"{quoted_name} {context_str} LinkedIn".strip()
+    # Step 3a: PRIMARY — Unipile authenticated LinkedIn search (best quality)
+    unipile_profiles: list[dict] = []
+    unipile_available = not get_unipile_config_errors(require_account=True)
+    if unipile_available:
+        search_keyword = f"{person_name} {context_str}".strip() if context_str else person_name
         try:
-            results = await search_web(fallback_query, max_results=5, recency_days=None)
-            all_results.extend(results)
-            logger.info("lookup_node: broad fallback returned %d results for %r", len(results), fallback_query)
+            unipile_profiles = await search_linkedin_people(
+                keyword=search_keyword,
+                account_id=_settings.UNIPILE_LINKEDIN_ACCOUNT_ID,
+                limit=7,
+            )
+            logger.info("lookup_node: Unipile search returned %d profiles for %r", len(unipile_profiles), search_keyword)
         except Exception as e:
-            logger.warning("lookup_node: broad fallback search failed: %s", e)
+            logger.warning("lookup_node: Unipile search failed: %s", e)
 
-    # Step 4: LLM synthesis — returns structured JSON
+    # Step 3b: FALLBACK — Tavily web search (used when Unipile is unavailable or returns nothing)
+    all_results: list[dict] = []
+    if not unipile_profiles:
+        primary_query = f"{quoted_name} {context_str}".strip() if context_str else quoted_name
+        try:
+            results = await search_web(
+                primary_query,
+                max_results=7,
+                recency_days=None,
+                include_domains=["linkedin.com"],
+            )
+            all_results.extend(results)
+            logger.info("lookup_node: Tavily linkedin-domain search returned %d for %r", len(results), primary_query)
+        except Exception as e:
+            logger.warning("lookup_node: Tavily linkedin domain search failed: %s", e)
+
+        if len(all_results) < 3:
+            try:
+                results = await search_web(
+                    f"{quoted_name} {context_str} LinkedIn".strip(),
+                    max_results=5,
+                    recency_days=None,
+                )
+                all_results.extend(results)
+            except Exception as e:
+                logger.warning("lookup_node: Tavily broad fallback failed: %s", e)
+
+    # Step 4: Match / synthesise result
     linkedin_url = ""
     found = False
     confidence = "low"
@@ -1289,7 +1310,45 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
     extracted_title = ""
     extracted_company = company_hint
 
-    if all_results and llm:
+    # --- Path A: Unipile returned profiles → pick best match ---
+    if unipile_profiles and person_name:
+        name_parts = [p.lower() for p in person_name.split() if len(p) > 1]
+
+        best: dict | None = None
+        for profile in unipile_profiles:
+            profile_name = profile.get("name", "").lower()
+            # Require ALL name parts to be present
+            if all(part in profile_name for part in name_parts):
+                best = profile
+                break
+
+        if best:
+            linkedin_url = best.get("linkedin_url", "")
+            username = best.get("public_identifier", "")
+            extracted_title = best.get("occupation", "")
+            extracted_company = best.get("location", "") or company_hint
+            found = bool(linkedin_url)
+            confidence = "high" if found else "low"
+            if found:
+                answer_text = (
+                    f"Found **{best.get('name', person_name)}** on LinkedIn.\n\n"
+                    f"- **LinkedIn URL:** {linkedin_url}\n"
+                    f"- **Username:** `{username}`\n"
+                    + (f"- **Title:** {extracted_title}\n" if extracted_title else "")
+                    + (f"- **Location:** {best.get('location', '')}\n" if best.get("location") else "")
+                )
+        else:
+            # Unipile returned results but none matched the full name
+            names_found = ", ".join(p.get("name", "") for p in unipile_profiles[:4] if p.get("name"))
+            search_url = f"https://www.linkedin.com/search/results/people/?keywords={person_name.replace(' ', '%20')}"
+            answer_text = (
+                f"I searched LinkedIn directly but couldn't find an exact match for **{person_name}**. "
+                f"The closest results were: {names_found}.\n\n"
+                f"You can try searching manually: [{search_url}]({search_url})"
+            )
+
+    # --- Path B: Tavily web results → LLM synthesis ---
+    elif all_results and llm:
         results_text = "\n\n".join(
             f"URL: {r.get('url', '')}\nTitle: {r.get('title', '')}\nSnippet: {r.get('content', '')[:500]}"
             for r in all_results[:10]
@@ -1314,26 +1373,23 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
             extracted_title = parsed.get("title") or ""
             extracted_company = parsed.get("company") or company_hint
 
-            # Verify: if LLM says found but URL doesn't contain the person's name parts, downgrade
+            # Guard: reject URL if no name part appears in it
             if found and linkedin_url:
                 name_parts = [p.lower() for p in (person_name or "").split() if len(p) > 2]
-                url_lower = linkedin_url.lower()
-                if name_parts and not any(part in url_lower for part in name_parts):
+                if name_parts and not any(part in linkedin_url.lower() for part in name_parts):
                     found = False
                     confidence = "low"
-                    logger.info("lookup_node: URL %r failed name-part validation for %r", linkedin_url, person_name)
-
         except Exception as e:
             logger.error("lookup_node: LLM synthesis failed: %s", e)
             answer_text = f"I searched for **{person_name or user_query}** but encountered an error. Please try again."
-    elif not all_results:
+
+    else:
         search_url = f"https://www.linkedin.com/search/results/people/?keywords={person_name.replace(' ', '%20')}"
         answer_text = (
-            f"I searched for **{person_name or user_query}** but couldn't find any results. "
-            f"Try searching directly on LinkedIn: {search_url}"
+            f"I couldn't find **{person_name or user_query}** — LinkedIn search is unavailable "
+            f"and web search returned no results.\n\n"
+            f"Try searching directly: [{search_url}]({search_url})"
         )
-    else:
-        answer_text = f"Found {len(all_results)} results for **{person_name or user_query}** but couldn't analyse them (no LLM available)."
 
     # Step 5: Build text response frame
     instance_id = f"lookup_{uuid4().hex[:8]}"

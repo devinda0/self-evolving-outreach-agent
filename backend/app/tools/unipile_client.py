@@ -112,6 +112,55 @@ async def get_user_profile(identifier: str, account_id: str) -> dict[str, Any]:
     )
 
 
+async def search_linkedin_people(
+    keyword: str,
+    account_id: str,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Search LinkedIn for people by name/keyword using the connected Unipile account.
+
+    Returns a list of profile dicts with keys: name, public_identifier, linkedin_url,
+    occupation, headline, location, provider_id.
+    Falls back to an empty list on any error so the caller can try other strategies.
+    """
+    try:
+        data = await _request(
+            "GET",
+            "/api/v1/users/search",
+            params={"account_id": account_id, "keyword": keyword, "limit": limit},
+        )
+    except Exception as exc:
+        logger.warning("search_linkedin_people: /users/search failed (%s), trying /users", exc)
+        try:
+            data = await _request(
+                "GET",
+                "/api/v1/users",
+                params={"account_id": account_id, "keyword": keyword, "limit": limit},
+            )
+        except Exception as exc2:
+            logger.warning("search_linkedin_people: both search endpoints failed: %s", exc2)
+            return []
+
+    items = data.get("items") or data.get("results") or []
+    if not isinstance(items, list):
+        return []
+
+    profiles = []
+    for item in items:
+        public_id = item.get("public_identifier") or item.get("publicIdentifier") or ""
+        profiles.append({
+            "name": " ".join(
+                p for p in [item.get("first_name"), item.get("last_name")] if p
+            ).strip() or item.get("name") or item.get("full_name") or "",
+            "public_identifier": public_id,
+            "linkedin_url": f"https://www.linkedin.com/in/{public_id}" if public_id else "",
+            "occupation": item.get("occupation") or item.get("headline") or "",
+            "location": item.get("location") or "",
+            "provider_id": item.get("provider_id") or item.get("providerId") or "",
+        })
+    return profiles
+
+
 async def list_chats(account_id: str, limit: int = 1) -> dict[str, Any]:
     return await _request("GET", "/api/v1/chats", params={"account_id": account_id, "limit": limit})
 
