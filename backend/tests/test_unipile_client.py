@@ -9,6 +9,7 @@ from app.tools.unipile_client import (
     extract_linkedin_identifier,
     get_unipile_base_url,
     get_unipile_connection_health,
+    list_post_comments,
     send_linkedin_message,
 )
 
@@ -94,7 +95,10 @@ async def test_create_linkedin_post_uses_multipart_form_payload():
     with patch(
         "app.tools.unipile_client._request",
         new_callable=AsyncMock,
-        return_value={"id": "post-1"},
+        side_effect=[
+            {"id": "post-1", "post_id": "7451690104781328384"},
+            {"social_id": "urn:li:activity:7451690104781328384"},
+        ],
     ) as request_mock, patch("app.tools.unipile_client.settings") as mock_settings:
         mock_settings.UNIPILE_DSN = "api34.unipile.com:16477"
         mock_settings.UNIPILE_API_KEY = "secret"
@@ -103,8 +107,9 @@ async def test_create_linkedin_post_uses_multipart_form_payload():
         result = await create_linkedin_post("Hello LinkedIn")
 
     assert result["id"] == "post-1"
-    assert request_mock.await_args.args[:2] == ("POST", "/api/v1/posts")
-    assert request_mock.await_args.kwargs["files"] == [
+    assert result["social_id"] == "urn:li:activity:7451690104781328384"
+    assert request_mock.await_args_list[0].args[:2] == ("POST", "/api/v1/posts")
+    assert request_mock.await_args_list[0].kwargs["files"] == [
         ("account_id", (None, "acc-1")),
         ("text", (None, "Hello LinkedIn")),
     ]
@@ -114,7 +119,10 @@ async def test_create_linkedin_post_includes_attachment_files():
     with patch(
         "app.tools.unipile_client._request",
         new_callable=AsyncMock,
-        return_value={"id": "post-2"},
+        side_effect=[
+            {"id": "post-2", "post_id": "7451690104781328385"},
+            {"social_id": "urn:li:activity:7451690104781328385"},
+        ],
     ) as request_mock, patch("app.tools.unipile_client.settings") as mock_settings:
         mock_settings.UNIPILE_DSN = "api34.unipile.com:16477"
         mock_settings.UNIPILE_API_KEY = "secret"
@@ -125,11 +133,34 @@ async def test_create_linkedin_post_includes_attachment_files():
             attachments=[("flyer.png", b"png-bytes", "image/png")],
         )
 
-    assert request_mock.await_args.kwargs["files"] == [
+    assert request_mock.await_args_list[0].kwargs["files"] == [
         ("account_id", (None, "acc-1")),
         ("text", (None, "Hello LinkedIn")),
         ("attachments", ("flyer.png", b"png-bytes", "image/png")),
     ]
+
+
+async def test_list_post_comments_resolves_linkedin_social_id():
+    with patch(
+        "app.tools.unipile_client._request",
+        new_callable=AsyncMock,
+        side_effect=[
+            {"social_id": "urn:li:activity:7451690104781328384"},
+            {"items": [{"id": "comment-1", "text": "Nice post"}]},
+        ],
+    ) as request_mock, patch("app.tools.unipile_client.settings") as mock_settings:
+        mock_settings.UNIPILE_DSN = "api34.unipile.com:16477"
+        mock_settings.UNIPILE_API_KEY = "secret"
+        mock_settings.UNIPILE_LINKEDIN_ACCOUNT_ID = "acc-1"
+
+        comments = await list_post_comments("7451690104781328384")
+
+    assert comments == [{"id": "comment-1", "text": "Nice post"}]
+    assert request_mock.await_args_list[0].args[:2] == ("GET", "/api/v1/posts/7451690104781328384")
+    assert request_mock.await_args_list[1].args[:2] == (
+        "GET",
+        "/api/v1/posts/urn%3Ali%3Aactivity%3A7451690104781328384/comments",
+    )
 
 
 def test_health_unipile_route_returns_probe_result():

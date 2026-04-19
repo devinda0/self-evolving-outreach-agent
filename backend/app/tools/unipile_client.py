@@ -130,6 +130,14 @@ async def get_current_user(account_id: str) -> dict[str, Any]:
     return await _request("GET", "/api/v1/users/me", params={"account_id": account_id})
 
 
+async def get_post(post_id: str, account_id: str) -> dict[str, Any]:
+    return await _request(
+        "GET",
+        f"/api/v1/posts/{quote(post_id, safe='')}",
+        params={"account_id": account_id},
+    )
+
+
 async def get_user_profile(identifier: str, account_id: str) -> dict[str, Any]:
     return await _request(
         "GET",
@@ -210,6 +218,35 @@ def _extract_message_id(payload: dict[str, Any]) -> str | None:
 
     last_message = payload.get("last_message") or {}
     return last_message.get("message_id") or last_message.get("provider_id")
+
+
+def _extract_post_social_id(payload: dict[str, Any]) -> str | None:
+    """Extract Unipile's stable LinkedIn social_id from a post payload."""
+    if not payload:
+        return None
+    return (
+        payload.get("social_id")
+        or payload.get("socialId")
+        or payload.get("provider_id")
+        or payload.get("providerId")
+    )
+
+
+async def _resolve_post_social_id(post_id: str, account_id: str) -> str:
+    """Resolve a LinkedIn post id to its social_id when needed."""
+    candidate = (post_id or "").strip()
+    if not candidate:
+        return candidate
+    if candidate.startswith("urn:li:"):
+        return candidate
+
+    try:
+        post = await get_post(candidate, account_id)
+    except Exception as exc:
+        logger.warning("_resolve_post_social_id: failed for post=%s: %s", candidate, exc)
+        return candidate
+
+    return _extract_post_social_id(post) or candidate
 
 
 async def send_linkedin_message(
@@ -364,11 +401,17 @@ async def create_linkedin_post(
     ]
     for filename, content, content_type in attachments or []:
         files.append(("attachments", (filename, content, content_type)))
-    return await _request(
+    response = await _request(
         "POST",
         "/api/v1/posts",
         files=files,
     )
+    created_post_id = (
+        response.get("post_id") or response.get("id") or response.get("provider_id") or ""
+    )
+    if created_post_id:
+        response["social_id"] = await _resolve_post_social_id(created_post_id, resolved_account_id)
+    return response
 
 
 async def list_post_comments(
@@ -383,14 +426,20 @@ async def list_post_comments(
     list on any error so callers don't need to handle exceptions.
     """
     resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    resolved_post_id = await _resolve_post_social_id(post_provider_id, resolved_account_id)
     try:
         data = await _request(
             "GET",
-            f"/api/v1/posts/{quote(post_provider_id, safe='')}/comments",
+            f"/api/v1/posts/{quote(resolved_post_id, safe='')}/comments",
             params={"account_id": resolved_account_id, "limit": limit},
         )
     except Exception as exc:
-        logger.warning("list_post_comments: failed for post=%s: %s", post_provider_id, exc)
+        logger.warning(
+            "list_post_comments: failed for post=%s resolved_post=%s: %s",
+            post_provider_id,
+            resolved_post_id,
+            exc,
+        )
         return []
 
     items = data.get("items") or data.get("data") or []
@@ -406,9 +455,10 @@ async def reply_to_post_comment(
 ) -> dict[str, Any]:
     """Post a reply to a comment on a LinkedIn post."""
     resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    resolved_post_id = await _resolve_post_social_id(post_provider_id, resolved_account_id)
     return await _request(
         "POST",
-        f"/api/v1/posts/{quote(post_provider_id, safe='')}/comments",
+        f"/api/v1/posts/{quote(resolved_post_id, safe='')}/comments",
         json_body={
             "account_id": resolved_account_id,
             "text": text,

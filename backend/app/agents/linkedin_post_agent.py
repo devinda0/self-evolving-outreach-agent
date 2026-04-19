@@ -628,7 +628,11 @@ async def _publish_post(state: CampaignState, session_id: str) -> dict:
                 attachments=[flyer_attachment] if flyer_attachment else None,
             )
             post_record["provider_id"] = (
-                result.get("id") or result.get("provider_id") or result.get("post_id") or ""
+                result.get("social_id")
+                or result.get("provider_id")
+                or result.get("id")
+                or result.get("post_id")
+                or ""
             )
             post_record["status"] = "sent"
             logger.info(
