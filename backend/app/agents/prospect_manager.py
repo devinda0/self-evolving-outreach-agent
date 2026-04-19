@@ -572,8 +572,66 @@ async def prospect_manage_node(state: CampaignState) -> dict:
         actions, current_cards, selected_ids
     )
 
-    # Persist updated prospects
-    if updated_cards != current_cards:
+    # --- Auto-find LinkedIn for newly added manual prospects with no contact info ---
+    old_ids = {c["id"] for c in current_cards}
+    new_ids = {c["id"] for c in updated_cards} - old_ids
+
+    auto_found_names: list[str] = []
+    final_cards = list(updated_cards)
+
+    try:
+        from app.core.config import settings as _settings
+        from app.tools.unipile_client import get_unipile_config_errors, search_linkedin_people
+
+        unipile_ok = not get_unipile_config_errors(require_account=True)
+        if unipile_ok:
+            for i, card in enumerate(final_cards):
+                if card["id"] not in new_ids:
+                    continue
+                if card.get("source") != "manual":
+                    continue
+                if card.get("email") or card.get("linkedin_url"):
+                    continue
+                name = card.get("name", "")
+                if not name:
+                    continue
+                try:
+                    profiles = await search_linkedin_people(
+                        keyword=name,
+                        account_id=_settings.UNIPILE_LINKEDIN_ACCOUNT_ID,
+                        limit=5,
+                    )
+                    name_parts = [p.lower() for p in name.split() if len(p) > 1]
+                    for profile in profiles:
+                        pname = profile.get("name", "").lower()
+                        if all(part in pname for part in name_parts):
+                            li_url = profile.get("linkedin_url", "")
+                            if li_url:
+                                final_cards[i] = {
+                                    **card,
+                                    "linkedin_url": li_url,
+                                    "channel_recommendation": "linkedin",
+                                }
+                                auto_found_names.append(name)
+                                logger.info(
+                                    "prospect_manage_node: auto-found LinkedIn for %s: %s",
+                                    name, li_url,
+                                )
+                                break
+                except Exception as exc:
+                    logger.warning("prospect_manage_node: Unipile auto-find failed for %s: %s", name, exc)
+    except ImportError:
+        pass
+
+    updated_cards = final_cards
+
+    # Append auto-find results to response message
+    if auto_found_names:
+        found_note = f"Found LinkedIn for: {', '.join(auto_found_names)}."
+        response_message = f"{response_message} {found_note}".strip() if response_message else found_note
+
+    # Persist updated prospects (may include auto-found LinkedIn URLs)
+    if updated_cards != current_cards or auto_found_names:
         try:
             await save_prospect_cards(session_id, updated_cards)
         except Exception as exc:
@@ -601,24 +659,72 @@ async def prospect_manage_node(state: CampaignState) -> dict:
             instance_id=instance_id,
         )
     else:
-        # Text-only response when no prospects to show
         ui_frame = UIFrame(
             type="text",
             component="MessageRenderer",
             instance_id=instance_id,
-            props={
-                "content": response_message,
-                "role": "assistant",
-            },
+            props={"content": response_message, "role": "assistant"},
             actions=[],
         ).model_dump()
 
+    ui_frames_list: list[dict] = [ui_frame]
+
+    # --- Clarification prompt for prospects still without contact info ---
+    no_contact = [
+        c for c in updated_cards
+        if c["id"] in new_ids
+        and c.get("source") == "manual"
+        and not c.get("email")
+        and not c.get("linkedin_url")
+    ]
+    if no_contact:
+        names_str = ", ".join(c["name"] for c in no_contact)
+        if len(no_contact) == 1:
+            q_text = (
+                f"I added {no_contact[0]['name']} but couldn't find their contact info. "
+                f"Want me to search online for their LinkedIn profile?"
+            )
+            search_msg = f"Find {no_contact[0]['name']}'s LinkedIn profile"
+        else:
+            q_text = (
+                f"I added {names_str} but couldn't find contact info. "
+                f"Want me to search online for their LinkedIn profiles?"
+            )
+            search_msg = f"Find LinkedIn profiles for {names_str}"
+
+        clarify_frame = UIFrame(
+            type="ui_component",
+            component="ClarificationPrompt",
+            instance_id=f"contact-find-{session_id[:8]}-{uuid.uuid4().hex[:4]}",
+            props={
+                "question": q_text,
+                "options": ["Yes, search online", "Skip for now"],
+                "custom_input_placeholder": "Or paste their LinkedIn URL or email address…",
+            },
+            actions=[
+                UIAction(
+                    id="search-online",
+                    label="Yes, search online",
+                    action_type="clarification_response",
+                    payload={"response": search_msg},
+                ),
+                UIAction(
+                    id="skip-contact",
+                    label="Skip for now",
+                    action_type="skip_contact_lookup",
+                    payload={},
+                ),
+            ],
+        ).model_dump()
+        ui_frames_list.append(clarify_frame)
+
     logger.info(
-        "prospect_manage_node completed | session=%s cards=%d selected=%d actions=%s",
+        "prospect_manage_node completed | session=%s cards=%d selected=%d actions=%s auto_found=%s",
         session_id,
         len(updated_cards),
         len(updated_selected),
         [a.get("type") for a in actions],
+        auto_found_names,
     )
 
     return {
@@ -626,7 +732,7 @@ async def prospect_manage_node(state: CampaignState) -> dict:
         "selected_prospect_ids": updated_selected,
         "next_node": "orchestrator",
         "session_complete": True,
-        "pending_ui_frames": [ui_frame],
+        "pending_ui_frames": ui_frames_list,
     }
 
 

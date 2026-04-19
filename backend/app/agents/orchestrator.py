@@ -1405,12 +1405,11 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
             logger.error("lookup_node: LLM synthesis failed: %s", e)
             answer_text = f"I searched for **{person_name or user_query}** but encountered an error. Please try again."
 
-    # --- Path C: Nothing found — provide direct search URL ---
+    # --- Path C: Nothing found — provide fallback message ---
     if not found and not answer_text:
-        search_url = f"https://www.linkedin.com/search/results/people/?keywords={person_name.replace(' ', '%20')}"
         answer_text = (
-            f"I couldn't find an exact LinkedIn profile for **{person_name or user_query}**.\n\n"
-            f"Try searching LinkedIn directly: [{search_url}]({search_url})"
+            f"I couldn't find an exact LinkedIn profile for **{person_name or user_query}**. "
+            f"Provide more context below and I'll try again."
         )
 
     # Step 5: Build text response frame
@@ -1422,6 +1421,27 @@ async def lookup_node(state: CampaignState) -> dict[str, Any]:
         props={"content": answer_text, "role": "assistant"},
         actions=[],
     ).model_dump())
+
+    # When not found: emit a clarification prompt so the user can provide more context
+    # (company, university, role) or paste the URL directly, without leaving the card.
+    if not found:
+        retry_instance_id = f"lookup_retry_{uuid4().hex[:8]}"
+        ui_frames.append(UIFrame(
+            type="ui_component",
+            component="ClarificationPrompt",
+            instance_id=retry_instance_id,
+            props={
+                "question": (
+                    f"Can you give me more details about {person_name or 'this person'}? "
+                    f"I'll search again with the extra context."
+                ),
+                "options": [],
+                "custom_input_placeholder": (
+                    "e.g. 'works at Google', 'studies at MIT', or paste their LinkedIn URL…"
+                ),
+            },
+            actions=[],
+        ).model_dump())
 
     # Step 6: Only show ProspectManager when LLM confirmed a match with medium/high confidence
     if found and linkedin_url and confidence in ("high", "medium") and person_name:
