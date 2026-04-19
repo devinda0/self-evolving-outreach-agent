@@ -5,7 +5,9 @@ interface ChannelDelivery {
   channel: string;
   sent: number;
   failed: number;
+  connection_pending?: number;
   failed_recipients?: string[];
+  pending_recipients?: string[];
 }
 
 interface Props {
@@ -75,10 +77,11 @@ const CHANNEL_STYLES: Record<string, { color: string; label: string }> = {
 export default function DeliveryStatusCard({ frame, onAction }: Props) {
   const totalSent = (frame.props.total_sent as number) ?? 0;
   const failed = (frame.props.failed as number) ?? 0;
+  const connectionPending = (frame.props.connection_pending as number) ?? 0;
   const breakdown = (frame.props.breakdown as ChannelDelivery[]) ?? [];
   const isPendingAction = useCampaignStore((s) => s.isPendingAction);
 
-  const allSuccess = failed === 0;
+  const allSuccess = failed === 0 && connectionPending === 0;
 
   // Collect all failed recipient IDs for retry
   const allFailedRecipients = breakdown.flatMap(
@@ -191,7 +194,7 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
             color: allSuccess ? "var(--success)" : "var(--signal-market)",
           }}
         >
-          {totalSent} sent · {failed} failed
+          {totalSent} sent{connectionPending > 0 ? ` · ${connectionPending} pending` : ""} · {failed} failed
         </span>
       </div>
 
@@ -203,8 +206,10 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
           borderRadius: "var(--radius-sm)",
           background: allSuccess
             ? "rgba(81,207,102,0.08)"
-            : "rgba(255,212,59,0.08)",
-          border: `1px solid ${allSuccess ? "rgba(81,207,102,0.3)" : "rgba(255,212,59,0.25)"}`,
+            : failed > 0
+              ? "rgba(255,212,59,0.08)"
+              : "rgba(116,192,252,0.08)",
+          border: `1px solid ${allSuccess ? "rgba(81,207,102,0.3)" : failed > 0 ? "rgba(255,212,59,0.25)" : "rgba(116,192,252,0.25)"}`,
           display: "flex",
           alignItems: "center",
           gap: "10px",
@@ -212,23 +217,27 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
       >
         <span
           style={{
-            color: allSuccess ? "var(--success)" : "var(--signal-market)",
+            color: allSuccess ? "var(--success)" : failed > 0 ? "var(--signal-market)" : "#74c0fc",
             flexShrink: 0,
           }}
         >
-          {allSuccess ? <CheckCircleIcon /> : <AlertTriangleIcon />}
+          {allSuccess || connectionPending > 0 && failed === 0 ? <CheckCircleIcon /> : <AlertTriangleIcon />}
         </span>
         <span
           style={{
             fontSize: "12px",
             lineHeight: "1.5",
-            color: allSuccess ? "var(--success)" : "var(--signal-market)",
+            color: allSuccess ? "var(--success)" : failed > 0 ? "var(--signal-market)" : "#74c0fc",
             fontWeight: 600,
           }}
         >
           {allSuccess
             ? `All ${totalSent} messages delivered successfully.`
-            : `${totalSent} delivered, ${failed} failed. Review failures below.`}
+            : failed > 0 && connectionPending === 0
+              ? `${totalSent} delivered, ${failed} failed. Review failures below.`
+              : connectionPending > 0 && failed === 0
+                ? `${connectionPending} connection request${connectionPending > 1 ? "s" : ""} sent — message${connectionPending > 1 ? "s" : ""} will be delivered automatically once accepted.`
+                : `${totalSent} delivered, ${connectionPending} pending, ${failed} failed.`}
         </span>
       </div>
 
@@ -265,7 +274,7 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["Channel", "Sent", "Failed"].map((h) => (
+                {["Channel", "Sent", "Pending", "Failed"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -292,39 +301,19 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
                     color: "var(--text-muted)",
                     label: ch.channel,
                   };
+                const pending = ch.connection_pending ?? 0;
                 return (
                   <tr key={ch.channel}>
-                    <td
-                      style={{
-                        padding: "8px 14px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        color: style.color,
-                      }}
-                    >
+                    <td style={{ padding: "8px 14px", fontSize: "12px", fontWeight: 600, color: style.color }}>
                       {style.label}
                     </td>
-                    <td
-                      style={{
-                        padding: "8px 14px",
-                        fontSize: "12px",
-                        fontFamily: "var(--font-mono)",
-                        color: "var(--success)",
-                      }}
-                    >
+                    <td style={{ padding: "8px 14px", fontSize: "12px", fontFamily: "var(--font-mono)", color: "var(--success)" }}>
                       {ch.sent}
                     </td>
-                    <td
-                      style={{
-                        padding: "8px 14px",
-                        fontSize: "12px",
-                        fontFamily: "var(--font-mono)",
-                        color:
-                          ch.failed > 0
-                            ? "var(--signal-market)"
-                            : "var(--text-muted)",
-                      }}
-                    >
+                    <td style={{ padding: "8px 14px", fontSize: "12px", fontFamily: "var(--font-mono)", color: pending > 0 ? "#74c0fc" : "var(--text-muted)" }}>
+                      {pending}
+                    </td>
+                    <td style={{ padding: "8px 14px", fontSize: "12px", fontFamily: "var(--font-mono)", color: ch.failed > 0 ? "var(--signal-market)" : "var(--text-muted)" }}>
                       {ch.failed}
                     </td>
                   </tr>
@@ -332,6 +321,27 @@ export default function DeliveryStatusCard({ frame, onAction }: Props) {
               })}
             </tbody>
           </table>
+
+          {/* Pending recipients per channel */}
+          {breakdown
+            .filter((ch) => (ch.connection_pending ?? 0) > 0 && (ch.pending_recipients ?? []).length > 0)
+            .map((ch) => {
+              const style = CHANNEL_STYLES[ch.channel.toLowerCase()] ?? { color: "var(--text-muted)", label: ch.channel };
+              return (
+                <div key={`${ch.channel}-pending`} style={{ padding: "8px 14px", borderTop: "1px solid var(--border-subtle)" }}>
+                  <span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase" as const, color: "#74c0fc", marginBottom: "6px", display: "block" }}>
+                    Connection request sent — {style.label}
+                  </span>
+                  <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "4px" }}>
+                    {ch.pending_recipients!.map((name) => (
+                      <span key={name} style={{ fontSize: "10px", fontFamily: "var(--font-mono)", color: "#74c0fc", background: "rgba(116,192,252,0.1)", border: "1px solid rgba(116,192,252,0.25)", borderRadius: "3px", padding: "2px 8px" }}>
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
 
           {/* Failed recipients per channel */}
           {breakdown

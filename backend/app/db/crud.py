@@ -16,6 +16,7 @@ from app.db.collections import (
     FEEDBACK_EVENTS,
     INTELLIGENCE_ENTRIES,
     MCP_SERVERS,
+    PENDING_LINKEDIN_MESSAGES,
     PROSPECT_CARDS,
     QUARANTINE,
     RESEARCH_FINDINGS,
@@ -614,6 +615,8 @@ async def create_indexes() -> None:
     await db[DEPLOYMENT_RECORDS].create_index(
         [("session_id", ASCENDING), ("prospect_id", ASCENDING)]
     )
+    await db[PENDING_LINKEDIN_MESSAGES].create_index("prospect_provider_id", unique=True)
+    await db[PENDING_LINKEDIN_MESSAGES].create_index("session_id")
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +703,43 @@ async def delete_mcp_server(server_id: str) -> bool:
     db = get_db()
     result = await db[MCP_SERVERS].delete_one({"server_id": server_id})
     return result.deleted_count > 0
+
+
+# ---------------------------------------------------------------------------
+# Pending LinkedIn messages — deferred sends awaiting connection acceptance
+# ---------------------------------------------------------------------------
+
+
+async def save_pending_linkedin_message(msg: dict[str, Any]) -> None:
+    """Store a LinkedIn message deferred until the connection request is accepted."""
+    db = get_db()
+    await db[PENDING_LINKEDIN_MESSAGES].insert_one({**msg})
+
+
+async def get_pending_linkedin_message_by_prospect_provider_id(
+    provider_id: str,
+) -> dict[str, Any] | None:
+    """Look up a pending message by the recipient's LinkedIn provider_id."""
+    db = get_db()
+    doc = await db[PENDING_LINKEDIN_MESSAGES].find_one({"prospect_provider_id": provider_id})
+    if doc is not None:
+        doc.pop("_id", None)
+    return doc
+
+
+async def delete_pending_linkedin_message(msg_id: str) -> None:
+    """Remove a pending message once it has been sent or abandoned."""
+    db = get_db()
+    await db[PENDING_LINKEDIN_MESSAGES].delete_one({"id": msg_id})
+
+
+async def update_deployment_record(
+    record_id: str,
+    update: dict[str, Any],
+) -> None:
+    """Apply a partial update to a deployment record by its internal ID."""
+    db = get_db()
+    await db[DEPLOYMENT_RECORDS].update_one({"id": record_id}, {"$set": update})
 
 
 # ---------------------------------------------------------------------------

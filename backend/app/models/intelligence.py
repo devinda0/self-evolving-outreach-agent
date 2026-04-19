@@ -49,8 +49,21 @@ class DeploymentRecord(BaseModel):
     ab_cohort: str
     rendered_content_hash: str
     sent_at: datetime
-    status: Literal["sent", "failed"] = "sent"
+    status: Literal["sent", "failed", "connection_pending"] = "sent"
     error_detail: Optional[str] = None
+
+
+class PendingLinkedInMessage(BaseModel):
+    """A LinkedIn message deferred until a connection request is accepted."""
+
+    id: str
+    session_id: str
+    variant_id: str
+    prospect_id: str
+    prospect_provider_id: str  # LinkedIn provider_id — used to match the webhook event
+    account_id: str             # Unipile account to send from
+    message: str                # Personalized message body ready to send
+    created_at: datetime
 
 
 class NormalizedFeedbackEvent(BaseModel):

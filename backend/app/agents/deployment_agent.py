@@ -24,7 +24,7 @@ from app.memory.manager import memory_manager
 from app.models.campaign_state import CampaignState
 from app.models.intelligence import DeploymentRecord, EmailThread, EmailThreadMessage
 from app.models.ui_frames import UIAction, UIFrame
-from app.tools.unipile_client import send_linkedin_message
+from app.tools.unipile_client import LinkedInConnectionRequired, send_linkedin_message
 
 logger = logging.getLogger(__name__)
 
@@ -185,33 +185,35 @@ async def _dispatch_send(
     variant: dict,
     prospect: dict,
     session_id: str,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, bool]:
     """Route a send to mock or real provider.
 
-    Returns ``(provider_message_id, error_detail)``.  On success
-    ``error_detail`` is ``None``; on failure ``provider_message_id`` is
-    ``None``.
+    Returns ``(provider_message_id, error_detail, connection_pending)``:
+    - success:            ``(msg_id, None,       False)``
+    - connection pending: ``(None,  None,        True)``  — request sent, message deferred to DB
+    - failure:            ``(None,  error_detail, False)``
     """
     if settings.USE_MOCK_SEND:
         msg_id = await mock_send(channel, prospect, personalize_variant(variant, prospect))
-        return msg_id, None
+        return msg_id, None, False
 
     try:
         if channel == "email":
             if not prospect.get("email"):
-                return None, "No email address found for prospect, but intended channel is email."
+                return None, "No email address found for prospect, but intended channel is email.", False
             msg_id = await send_via_email(variant, prospect, session_id)
-            return msg_id, None
+            return msg_id, None, False
 
         if channel == "linkedin":
             if not prospect.get("linkedin_url"):
-                return None, (
-                    "No LinkedIn profile URL found for prospect, but intended channel is linkedin."
-                )
+                return None, "No LinkedIn profile URL found for prospect, but intended channel is linkedin.", False
             msg_id = await send_via_linkedin(variant, prospect)
-            return msg_id, None
+            return msg_id, None, False
 
-        return None, f"Unsupported outbound channel '{channel}'."
+        return None, f"Unsupported outbound channel '{channel}'.", False
+
+    except LinkedInConnectionRequired as exc:
+        return await _handle_connection_required(exc, variant, prospect, session_id)
 
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
@@ -219,17 +221,7 @@ async def _dispatch_send(
             body = exc.response.text[:300].strip()
         except Exception:
             body = ""
-        if status_code == 403:
-            detail = (
-                f"LinkedIn rejected the message (403 Forbidden). "
-                "The recipient may not be a 1st-degree connection or may have messaging restrictions."
-            )
-            if body:
-                detail += f" Provider response: {body}"
-        else:
-            detail = f"Provider returned HTTP {status_code}"
-            if body:
-                detail += f": {body}"
+        detail = f"Provider returned HTTP {status_code}" + (f": {body}" if body else "")
         logger.error(
             "_dispatch_send provider HTTP error prospect=%s channel=%s status=%s body=%s",
             prospect.get("id"),
@@ -237,7 +229,8 @@ async def _dispatch_send(
             status_code,
             body,
         )
-        return None, detail
+        return None, detail, False
+
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "_dispatch_send unexpected error prospect=%s channel=%s: %s",
@@ -245,7 +238,56 @@ async def _dispatch_send(
             channel,
             exc,
         )
-        return None, str(exc)
+        return None, str(exc), False
+
+
+async def _handle_connection_required(
+    exc: LinkedInConnectionRequired,
+    variant: dict,
+    prospect: dict,
+    session_id: str,
+) -> tuple[None, None, bool]:
+    """Send a LinkedIn connection request and store the deferred message.
+
+    Returns the connection_pending 3-tuple on success, or the failure 3-tuple
+    if the connection request itself also fails.
+    """
+    from app.db.crud import save_pending_linkedin_message
+    from app.tools.unipile_client import send_connection_request
+
+    account_id = settings.UNIPILE_LINKEDIN_ACCOUNT_ID or ""
+    try:
+        await send_connection_request(exc.provider_id, account_id=account_id)
+
+        pending = {
+            "id": str(uuid4()),
+            "session_id": session_id,
+            "variant_id": variant.get("id", ""),
+            "prospect_id": prospect.get("id", ""),
+            "prospect_provider_id": exc.provider_id,
+            "account_id": account_id,
+            "message": personalize_variant(variant, prospect),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await save_pending_linkedin_message(pending)
+
+        logger.info(
+            "_handle_connection_required: connection request sent, message deferred | "
+            "prospect=%s provider_id=%s",
+            prospect.get("id"),
+            exc.provider_id,
+        )
+        return None, None, True
+
+    except Exception as conn_exc:  # noqa: BLE001
+        logger.error(
+            "_handle_connection_required: connection request failed | "
+            "prospect=%s provider_id=%s error=%s",
+            prospect.get("id"),
+            exc.provider_id,
+            conn_exc,
+        )
+        return None, f"LinkedIn 403 — connection request also failed: {conn_exc}", False
 
 
 # ---------------------------------------------------------------------------
@@ -324,13 +366,25 @@ def build_delivery_status_frame(
     for r in deployment_records:
         ch = r.get("channel", "email")
         if ch not in channel_data:
-            channel_data[ch] = {"channel": ch, "sent": 0, "failed": 0, "failed_recipients": []}
-        if r.get("status") == "sent":
+            channel_data[ch] = {
+                "channel": ch,
+                "sent": 0,
+                "failed": 0,
+                "connection_pending": 0,
+                "failed_recipients": [],
+                "pending_recipients": [],
+            }
+        status = r.get("status")
+        pid = r.get("prospect_id", "")
+        name = prospect_names.get(pid, pid)
+        if status == "sent":
             channel_data[ch]["sent"] += 1
+        elif status == "connection_pending":
+            channel_data[ch]["connection_pending"] += 1
+            if name:
+                channel_data[ch]["pending_recipients"].append(name)
         else:
             channel_data[ch]["failed"] += 1
-            pid = r.get("prospect_id", "")
-            name = prospect_names.get(pid, pid)
             if name:
                 channel_data[ch]["failed_recipients"].append(name)
 
@@ -341,6 +395,7 @@ def build_delivery_status_frame(
         props={
             "total_sent": len(sent_records),
             "failed": len(failed_records),
+            "connection_pending": len([r for r in deployment_records if r.get("status") == "connection_pending"]),
             "breakdown": list(channel_data.values()),
             "records": [
                 {
@@ -645,13 +700,18 @@ async def deployment_agent_node(state: CampaignState) -> dict:
         rendered_content = personalize_variant(variant, prospect)
 
         # Dispatch to real or mock provider
-        provider_message_id, error_detail = await _dispatch_send(
+        provider_message_id, error_detail, connection_pending = await _dispatch_send(
             channel=channel,
             variant=variant,
             prospect=prospect,
             session_id=session_id,
         )
-        send_status: Literal["sent", "failed"] = "failed" if error_detail else "sent"
+        if connection_pending:
+            send_status: Literal["sent", "failed", "connection_pending"] = "connection_pending"
+        elif error_detail:
+            send_status = "failed"
+        else:
+            send_status = "sent"
         if settings.USE_MOCK_SEND:
             provider = "mock"
         elif channel == "email":
@@ -729,16 +789,25 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     # Build post-deployment response message
     sent_count = sum(1 for r in deployment_records if r.get("status") == "sent")
     failed_count = sum(1 for r in deployment_records if r.get("status") == "failed")
+    pending_count = sum(1 for r in deployment_records if r.get("status") == "connection_pending")
     channels_used = list({r.get("channel", "email") for r in deployment_records})
 
-    if failed_count == 0:
-        status_summary = f"All {sent_count} messages sent successfully"
-    else:
-        status_summary = f"{sent_count} sent, {failed_count} failed"
+    parts = []
+    if sent_count:
+        parts.append(f"{sent_count} sent")
+    if pending_count:
+        parts.append(f"{pending_count} connection request(s) sent")
+    if failed_count:
+        parts.append(f"{failed_count} failed")
+    status_summary = ", ".join(parts) if parts else "0 sent"
 
+    pending_note = (
+        " Messages to pending connections will be sent automatically once they accept."
+        if pending_count else ""
+    )
     response_message = (
-        f"Deployment complete — {status_summary} via {', '.join(channels_used)}. "
-        "You can track engagement results as they come in, or report feedback manually."
+        f"Deployment complete — {status_summary} via {', '.join(channels_used)}."
+        f"{pending_note} You can track engagement results as they come in, or report feedback manually."
     )
     response_frame = UIFrame(
         type="text",

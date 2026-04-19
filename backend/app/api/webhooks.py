@@ -15,15 +15,18 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.db.crud import (
     append_thread_message,
+    delete_pending_linkedin_message,
     find_deployment_by_recipient_email,
     get_deployment_by_provider_message_id,
     get_email_thread_by_provider_message_id,
     get_feedback_event_by_dedupe_key,
     get_feedback_events_for_session,
+    get_pending_linkedin_message_by_prospect_provider_id,
     get_quarantine_events_for_session,
     save_dlq_event,
     save_feedback_event,
     save_quarantine_event,
+    update_deployment_record,
     update_dlq_event,
     upsert_email_thread,
 )
@@ -120,6 +123,11 @@ _UNIPILE_EVENT_MAP: dict[str, str] = {
     "message.replied": "reply",
     "message.failed": "bounce",
 }
+
+# Unipile event types that signal a LinkedIn connection was accepted
+_CONNECTION_ACCEPTED_TYPES: frozenset[str] = frozenset(
+    {"new_connection", "connection.accepted", "connection_accepted"}
+)
 
 
 def _map_unipile_event_type(unipile_type: str) -> str:
@@ -250,10 +258,16 @@ async def webhook_unipile(request: Request) -> dict[str, str]:
     """Ingest a Unipile webhook event and normalize it."""
     payload: dict[str, Any] = await request.json()
 
+    raw_type = payload.get("type", "unknown")
+
+    # Connection-accepted events are handled separately — they trigger a deferred message send.
+    if raw_type in _CONNECTION_ACCEPTED_TYPES:
+        await _handle_linkedin_connection_accepted(payload)
+        return {"status": "accepted"}
+
     data = payload.get("data", {})
     provider_message_id = data.get("message_id") or payload.get("provider_message_id")
     provider_event_id = data.get("event_id") or payload.get("provider_event_id", "")
-    raw_type = payload.get("type", "unknown")
     event_type = _map_unipile_event_type(raw_type)
 
     dedupe_key = f"unipile:{provider_event_id or uuid4()}"
@@ -665,6 +679,100 @@ async def _update_thread_with_reply(
             "_update_thread_with_reply: created new thread for prospect=%s",
             prospect_id,
         )
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn connection-accepted handler
+# ---------------------------------------------------------------------------
+
+
+async def _handle_linkedin_connection_accepted(payload: dict[str, Any]) -> None:
+    """Handle a Unipile 'connection accepted' event.
+
+    Looks up any deferred message stored for the newly connected user and
+    sends it immediately, then updates the deployment record to 'sent' and
+    cleans up the pending entry.
+    """
+    from app.db.client import get_db
+    from app.db.collections import DEPLOYMENT_RECORDS
+    from app.tools.unipile_client import send_linkedin_message_direct
+
+    data = payload.get("data", {})
+
+    # Unipile may nest the connected user's provider_id in several shapes
+    provider_id: str = (
+        data.get("provider_id")
+        or (data.get("connection") or {}).get("provider_id")
+        or (data.get("attendee") or {}).get("provider_id")
+        or ""
+    )
+    if not provider_id:
+        logger.warning(
+            "_handle_linkedin_connection_accepted: no provider_id in payload — ignoring"
+        )
+        return
+
+    pending = await get_pending_linkedin_message_by_prospect_provider_id(provider_id)
+    if not pending:
+        logger.debug(
+            "_handle_linkedin_connection_accepted: no pending message for provider_id=%s",
+            provider_id,
+        )
+        return
+
+    session_id = pending["session_id"]
+    prospect_id = pending["prospect_id"]
+    account_id = pending["account_id"]
+    message = pending["message"]
+    pending_id = pending["id"]
+
+    # Find the connection_pending deployment record
+    db = get_db()
+    raw = await db[DEPLOYMENT_RECORDS].find_one(
+        {"session_id": session_id, "prospect_id": prospect_id, "status": "connection_pending"}
+    )
+    deployment_record_id: str | None = None
+    if raw:
+        raw.pop("_id", None)
+        deployment_record_id = raw.get("id")
+
+    try:
+        result = await send_linkedin_message_direct(
+            provider_id=provider_id,
+            message=message,
+            account_id=account_id,
+        )
+        new_msg_id = result.get("provider_message_id")
+
+        if deployment_record_id:
+            await update_deployment_record(
+                deployment_record_id,
+                {"status": "sent", "provider_message_id": new_msg_id, "error_detail": None},
+            )
+
+        logger.info(
+            "_handle_linkedin_connection_accepted: deferred message sent | "
+            "prospect=%s provider_id=%s msg_id=%s",
+            prospect_id,
+            provider_id,
+            new_msg_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "_handle_linkedin_connection_accepted: failed to send deferred message | "
+            "prospect=%s provider_id=%s error=%s",
+            prospect_id,
+            provider_id,
+            exc,
+        )
+        if deployment_record_id:
+            await update_deployment_record(
+                deployment_record_id,
+                {"error_detail": f"Auto-send after connection accepted failed: {exc}"},
+            )
+        return
+
+    await delete_pending_linkedin_message(pending_id)
 
 
 # ---------------------------------------------------------------------------

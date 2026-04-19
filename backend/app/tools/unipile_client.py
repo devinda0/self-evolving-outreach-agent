@@ -25,6 +25,21 @@ _TIMEOUT_SECONDS = 20.0
 _LINKEDIN_IDENTIFIER_RE = re.compile(r"linkedin\.com/(?:in|company)/([^/?#]+)", re.IGNORECASE)
 
 
+class LinkedInConnectionRequired(Exception):
+    """Raised when a LinkedIn message send fails because the recipient is not connected.
+
+    Carries the provider_id and public_identifier so the caller can send a
+    connection request without a second profile lookup.
+    """
+
+    def __init__(self, provider_id: str, public_identifier: str) -> None:
+        self.provider_id = provider_id
+        self.public_identifier = public_identifier
+        super().__init__(
+            f"Not connected to LinkedIn user '{public_identifier}' (provider_id={provider_id})"
+        )
+
+
 def get_unipile_config_errors(require_account: bool = True) -> list[str]:
     """Return configuration issues that would block Unipile usage."""
     errors: list[str] = []
@@ -223,7 +238,15 @@ async def send_linkedin_message(
         ("text", (None, message)),
         ("attendees_ids", (None, provider_id)),
     ]
-    chat = await _request("POST", "/api/v1/chats", files=files)
+    try:
+        chat = await _request("POST", "/api/v1/chats", files=files)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            raise LinkedInConnectionRequired(
+                provider_id=provider_id,
+                public_identifier=profile.get("public_identifier") or identifier,
+            ) from exc
+        raise
 
     provider_message_id = _extract_message_id(chat)
     if not provider_message_id and chat.get("id"):
@@ -245,6 +268,70 @@ async def send_linkedin_message(
         "recipient_provider_id": provider_id,
         "recipient_public_identifier": profile.get("public_identifier") or identifier,
     }
+
+
+async def send_connection_request(
+    provider_id: str,
+    *,
+    account_id: str | None = None,
+    message: str | None = None,
+) -> dict[str, Any]:
+    """Send a LinkedIn connection request to a user identified by their provider_id."""
+    resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    if not resolved_account_id:
+        raise ValueError("UNIPILE_LINKEDIN_ACCOUNT_ID is not set.")
+
+    files: list[tuple[str, tuple[None, str]]] = [
+        ("account_id", (None, resolved_account_id)),
+        ("provider_id", (None, provider_id)),
+    ]
+    if message:
+        files.append(("message", (None, message)))
+
+    return await _request(
+        "POST",
+        f"/api/v1/users/{quote(provider_id, safe='')}/invite",
+        files=files,
+    )
+
+
+async def send_linkedin_message_direct(
+    provider_id: str,
+    message: str,
+    *,
+    account_id: str | None = None,
+) -> dict[str, Any]:
+    """Send a LinkedIn DM directly using a known provider_id (no profile lookup).
+
+    Used by the webhook handler to deliver messages that were deferred
+    pending a connection request acceptance.
+    """
+    resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
+    if not resolved_account_id:
+        raise ValueError("UNIPILE_LINKEDIN_ACCOUNT_ID is not set.")
+
+    files = [
+        ("account_id", (None, resolved_account_id)),
+        ("text", (None, message)),
+        ("attendees_ids", (None, provider_id)),
+    ]
+    chat = await _request("POST", "/api/v1/chats", files=files)
+
+    provider_message_id = _extract_message_id(chat)
+    if not provider_message_id and chat.get("id"):
+        messages = await _request(
+            "GET",
+            f"/api/v1/chats/{quote(chat['id'], safe='')}/messages",
+            params={"limit": 1},
+        )
+        items = messages.get("items") or []
+        if items:
+            provider_message_id = items[0].get("message_id") or items[0].get("provider_id")
+
+    if not provider_message_id:
+        raise ValueError("Unipile returned no provider message id for the sent LinkedIn DM.")
+
+    return {"provider_message_id": provider_message_id, "chat_id": chat.get("id")}
 
 
 async def get_unipile_connection_health(account_id: str | None = None) -> dict[str, Any]:
