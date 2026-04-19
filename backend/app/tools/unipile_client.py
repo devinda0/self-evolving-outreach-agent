@@ -290,7 +290,7 @@ async def send_connection_request(
 
     return await _request(
         "POST",
-        f"/api/v1/users/{quote(provider_id, safe='')}/invite",
+        f"/api/v1/users/{quote(provider_id, safe='')}/relation",
         files=files,
     )
 
