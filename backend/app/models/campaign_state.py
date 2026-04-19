@@ -80,6 +80,7 @@ class CampaignState(TypedDict):
     linkedin_post_phase: Optional[str]    # None | "composed" | "confirming" | "published"
     linkedin_post_html: Optional[str]     # current flyer HTML being worked on
     linkedin_post_caption: Optional[str]  # current post caption being worked on
+    linkedin_post_image_data_url: Optional[str]  # transient PNG data URL captured for publish
     linkedin_post_confirmed: bool         # publish gate (mirrors deployment_confirmed pattern)
     linkedin_posts: Annotated[list, operator.add]  # published post records (accumulates)
 

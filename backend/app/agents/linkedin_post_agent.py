@@ -8,8 +8,11 @@ Flow:
   Phase 5 (Monitor):  Fetch post comments; LLM generates suggested replies.
 """
 
+import base64
+import binascii
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -22,6 +25,7 @@ from app.models.campaign_state import CampaignState
 from app.models.ui_frames import UIAction, UIFrame
 
 logger = logging.getLogger(__name__)
+_INLINE_IMAGE_RE = re.compile(r"^data:(image/[-+\w.]+);base64,(.+)$", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +260,38 @@ def _format_http_error(exc: Exception) -> str:
     return f"HTTP {status}" + (f" — {detail}" if detail else "")
 
 
+def _decode_inline_flyer_image(
+    data_url: str | None,
+) -> tuple[str, bytes, str] | None:
+    """Convert a browser-captured data URL into a multipart attachment tuple."""
+    if not data_url:
+        return None
+
+    match = _INLINE_IMAGE_RE.match(data_url.strip())
+    if not match:
+        logger.warning("_decode_inline_flyer_image: unsupported data URL format")
+        return None
+
+    mime_type = match.group(1).lower()
+    extension = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/webp": "webp",
+    }.get(mime_type)
+    if not extension:
+        logger.warning("_decode_inline_flyer_image: unsupported mime type %s", mime_type)
+        return None
+
+    try:
+        content = base64.b64decode(match.group(2), validate=True)
+    except (ValueError, binascii.Error):
+        logger.warning("_decode_inline_flyer_image: invalid base64 payload")
+        return None
+
+    return (f"linkedin-flyer.{extension}", content, mime_type)
+
+
 # ---------------------------------------------------------------------------
 # UI frame builders
 # ---------------------------------------------------------------------------
@@ -432,6 +468,7 @@ async def _compose_post(
     return {
         "linkedin_post_html": html,
         "linkedin_post_caption": caption,
+        "linkedin_post_image_data_url": None,
         "linkedin_post_phase": "composed",
         "linkedin_post_confirmed": False,
         "next_node": "orchestrator",
@@ -480,6 +517,7 @@ async def _refine_post(
     return {
         "linkedin_post_html": html,
         "linkedin_post_caption": caption,
+        "linkedin_post_image_data_url": None,
         "linkedin_post_phase": "composed",
         "linkedin_post_confirmed": False,
         "next_node": "orchestrator",
@@ -527,6 +565,8 @@ async def _publish_post(state: CampaignState, session_id: str) -> dict:
 
     caption = state.get("linkedin_post_caption") or ""
     html = state.get("linkedin_post_html") or ""
+    image_data_url = state.get("linkedin_post_image_data_url") or ""
+    flyer_attachment = _decode_inline_flyer_image(image_data_url)
 
     if not caption:
         error_text = "No caption found. Please compose a post first before publishing."
@@ -583,7 +623,10 @@ async def _publish_post(state: CampaignState, session_id: str) -> dict:
                 ],
             }
         try:
-            result = await create_linkedin_post(text=caption)
+            result = await create_linkedin_post(
+                text=caption,
+                attachments=[flyer_attachment] if flyer_attachment else None,
+            )
             post_record["provider_id"] = (
                 result.get("id") or result.get("provider_id") or result.get("post_id") or ""
             )
@@ -638,6 +681,7 @@ async def _publish_post(state: CampaignState, session_id: str) -> dict:
     return {
         "linkedin_posts": [post_record],
         "linkedin_post_phase": "published",
+        "linkedin_post_image_data_url": None,
         "linkedin_post_confirmed": False,
         "next_node": "orchestrator",
         "session_complete": True,

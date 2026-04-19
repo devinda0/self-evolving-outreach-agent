@@ -110,6 +110,28 @@ async def test_create_linkedin_post_uses_multipart_form_payload():
     ]
 
 
+async def test_create_linkedin_post_includes_attachment_files():
+    with patch(
+        "app.tools.unipile_client._request",
+        new_callable=AsyncMock,
+        return_value={"id": "post-2"},
+    ) as request_mock, patch("app.tools.unipile_client.settings") as mock_settings:
+        mock_settings.UNIPILE_DSN = "api34.unipile.com:16477"
+        mock_settings.UNIPILE_API_KEY = "secret"
+        mock_settings.UNIPILE_LINKEDIN_ACCOUNT_ID = "acc-1"
+
+        await create_linkedin_post(
+            "Hello LinkedIn",
+            attachments=[("flyer.png", b"png-bytes", "image/png")],
+        )
+
+    assert request_mock.await_args.kwargs["files"] == [
+        ("account_id", (None, "acc-1")),
+        ("text", (None, "Hello LinkedIn")),
+        ("attachments", ("flyer.png", b"png-bytes", "image/png")),
+    ]
+
+
 def test_health_unipile_route_returns_probe_result():
     app = FastAPI()
     app.include_router(health_router)

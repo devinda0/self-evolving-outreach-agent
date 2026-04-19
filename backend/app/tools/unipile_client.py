@@ -92,7 +92,7 @@ async def _request(
     path: str,
     *,
     params: dict[str, Any] | None = None,
-    files: list[tuple[str, tuple[None, str]]] | None = None,
+    files: list[tuple[str, tuple[Any, ...]]] | None = None,
     json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Perform a Unipile API request and return the parsed JSON body."""
@@ -347,6 +347,7 @@ async def create_linkedin_post(
     text: str,
     *,
     account_id: str | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> dict[str, Any]:
     """Publish a text post to the connected LinkedIn account via Unipile.
 
@@ -361,6 +362,8 @@ async def create_linkedin_post(
         ("account_id", (None, resolved_account_id)),
         ("text", (None, text)),
     ]
+    for filename, content, content_type in attachments or []:
+        files.append(("attachments", (filename, content, content_type)))
     return await _request(
         "POST",
         "/api/v1/posts",

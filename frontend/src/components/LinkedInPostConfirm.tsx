@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UIFrame, UIAction } from "../store/campaignStore";
 import { useCampaignStore } from "../store/campaignStore";
+import { captureIframeContentAsPngDataUrl } from "./linkedinFlyerImage";
 
 interface Props {
   frame: UIFrame;
@@ -32,6 +33,8 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
     "";
   const isPendingAction = useCampaignStore((s) => s.isPendingAction);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [isCapturingImage, setIsCapturingImage] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
 
   const confirmAction = frame.actions.find(
     (a: UIAction) => a.action_type === "confirm_linkedin_post" || a.id === "confirm_linkedin_post",
@@ -58,9 +61,30 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
     setTimeout(resize, 600);
   }, [html]);
 
-  function handleConfirm() {
+  async function handleConfirm() {
     const id = confirmAction?.id ?? "confirm_linkedin_post";
-    onAction(frame.instance_id, id, { ...(confirmAction?.payload ?? {}), action: "confirm_linkedin_post" });
+    setCaptureError(null);
+    setIsCapturingImage(true);
+    try {
+      let flyerImageDataUrl: string | undefined;
+      if (html && iframeRef.current) {
+        flyerImageDataUrl = await captureIframeContentAsPngDataUrl(iframeRef.current) ?? undefined;
+        if (!flyerImageDataUrl) {
+          setCaptureError("Couldn't prepare the flyer image. Please try again.");
+          return;
+        }
+      }
+
+      onAction(frame.instance_id, id, {
+        ...(confirmAction?.payload ?? {}),
+        action: "confirm_linkedin_post",
+        flyer_image_data_url: flyerImageDataUrl,
+      });
+    } catch {
+      setCaptureError("Couldn't prepare the flyer image. Please try again.");
+    } finally {
+      setIsCapturingImage(false);
+    }
   }
 
   function handleCancel() {
@@ -144,21 +168,38 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
         </span>
       </div>
 
+      {captureError && (
+        <div
+          style={{
+            margin: "0 20px 16px",
+            padding: "10px 14px",
+            borderRadius: "var(--radius-sm)",
+            background: "rgba(255,107,107,0.08)",
+            border: "1px solid rgba(255,107,107,0.25)",
+            fontSize: "11.5px",
+            color: "#ff8d8d",
+            lineHeight: "1.5",
+          }}
+        >
+          {captureError}
+        </div>
+      )}
+
       {/* Buttons */}
       <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "flex-end", gap: "10px", borderTop: "1px solid var(--border-subtle)" }}>
         <button
           type="button"
           className="btn-ghost"
-          disabled={isPendingAction}
+          disabled={isPendingAction || isCapturingImage}
           onClick={handleCancel}
-          style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center", gap: "6px", opacity: isPendingAction ? 0.5 : undefined }}
+          style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center", gap: "6px", opacity: isPendingAction || isCapturingImage ? 0.5 : undefined }}
         >
           <ArrowLeftIcon />
           Go Back &amp; Edit
         </button>
         <button
           type="button"
-          disabled={isPendingAction}
+          disabled={isPendingAction || isCapturingImage}
           onClick={handleConfirm}
           style={{
             fontSize: "12px",
@@ -167,15 +208,15 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
             background: "#0a66c2",
             color: "#fff",
             border: "none",
-            cursor: isPendingAction ? "not-allowed" : "pointer",
+            cursor: isPendingAction || isCapturingImage ? "not-allowed" : "pointer",
             fontWeight: 600,
-            opacity: isPendingAction ? 0.6 : 1,
+            opacity: isPendingAction || isCapturingImage ? 0.6 : 1,
             display: "flex",
             alignItems: "center",
             gap: "6px",
           }}
         >
-          {isPendingAction ? (
+          {isPendingAction || isCapturingImage ? (
             <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Publishing…</>
           ) : (
             "Confirm & Publish"

@@ -211,6 +211,14 @@ def test_state_delta_before_rerun_persists_linkedin_caption_edits():
     assert delta == {"linkedin_post_caption": "Updated LinkedIn caption"}
 
 
+def test_state_delta_before_rerun_persists_linkedin_flyer_image():
+    payload = {"flyer_image_data_url": "data:image/png;base64,Zm9v"}
+
+    delta = _state_delta_before_rerun("confirm_linkedin_post", payload)
+
+    assert delta == {"linkedin_post_image_data_url": "data:image/png;base64,Zm9v"}
+
+
 def test_linkedin_confirm_frame_includes_full_preview_content():
     frame = build_linkedin_post_confirm_frame(
         "<div>Flyer</div>",
