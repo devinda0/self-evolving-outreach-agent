@@ -383,9 +383,10 @@ async def save_prospect_cards(session_id: str, cards: list[dict[str, Any]]) -> N
     db = get_db()
     await db[PROSPECT_CARDS].delete_many({"session_id": session_id})
     if cards:
-        for card in cards:
-            card["session_id"] = session_id
-        await db[PROSPECT_CARDS].insert_many(cards)
+        # Use shallow copies so insert_many's in-place _id injection does not
+        # mutate the caller's dicts (ObjectId is not msgpack-serializable).
+        docs = [{**card, "session_id": session_id} for card in cards]
+        await db[PROSPECT_CARDS].insert_many(docs)
 
 
 async def get_prospect_cards(session_id: str) -> list[dict[str, Any]]:
