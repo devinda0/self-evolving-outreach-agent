@@ -20,6 +20,7 @@ from app.agents.mcp_config_agent import mcp_config_node
 from app.agents.orchestrator import (
     answer_node,
     clarify_node,
+    lookup_node,
     orchestrator_node,
     update_context_node,
 )
@@ -68,6 +69,7 @@ def route_from_orchestrator(state: CampaignState) -> str:
         "answer",
         "update_context",
         "mcp_configure",
+        "lookup",
     ):
         logger.info(
             "route_from_orchestrator → %s | session=%s intent=%s",
@@ -137,6 +139,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_node("answer", answer_node)
     builder.add_node("update_context", update_context_node)
     builder.add_node("mcp_configure", mcp_config_node)
+    builder.add_node("lookup", lookup_node)
 
     # -- Entry point --
     builder.set_entry_point("orchestrator")
@@ -161,6 +164,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
             "answer": "answer",
             "update_context": "update_context",
             "mcp_configure": "mcp_configure",
+            "lookup": "lookup",
             END: END,
         },
     )
@@ -184,6 +188,7 @@ def build_graph(checkpointer: MongoDBSaver | None = None) -> CompiledStateGraph:
     builder.add_edge("answer", END)
     builder.add_edge("update_context", END)
     builder.add_edge("mcp_configure", END)
+    builder.add_edge("lookup", END)
 
     return builder.compile(checkpointer=checkpointer)
 

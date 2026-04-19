@@ -44,6 +44,7 @@ VALID_INTENTS = frozenset(
         "answer",
         "update_context",
         "mcp_configure",
+        "lookup",
     ]
 )
 
@@ -61,6 +62,7 @@ INTENT_TO_NODE = {
     "answer": "answer",
     "update_context": "update_context",
     "mcp_configure": "mcp_configure",
+    "lookup": "lookup",
 }
 
 SYSTEM_PROMPT = """You are the Orchestrator of Signal to Action, a multi-agent growth intelligence system.
@@ -70,7 +72,8 @@ Your sole job: classify the user's latest message into exactly one intent mode a
 ## Intent Modes
 - research: user wants market intelligence, competitor analysis, audience signals, channel trends
 - segment: user wants to define a target segment or score/rank/filter already-loaded prospects
-- prospect_manage: user wants to find, discover, search for, or look up prospects using available tools AND/OR manage them — add/remove/edit individual prospects, upload CSV, view current prospect list, select specific prospects by name, clear prospects, or change who receives outreach. Use this whenever the user says "find prospects", "discover prospects", "search for prospects", "can you find some prospects?", "look up prospects", or asks to modify the prospect list.
+- prospect_manage: user wants to find/discover MULTIPLE prospects for the campaign target market, OR manage the prospect list (add/remove/edit individuals, upload CSV, view prospects, select for outreach). Use for bulk discovery and list management. Key: "find prospects", "discover prospects", "search for prospects".
+- lookup: user wants to find information about ONE SPECIFIC named individual — their LinkedIn profile URL, LinkedIn username, email, company, title, or other contact details. This is a targeted lookup for a single person, NOT bulk prospect discovery. Key phrases: "what is [name]'s LinkedIn?", "find [name]'s profile", "look up [name]", "can you find it through internet?", "search for [name] online", "find his/her LinkedIn", "what is his/her username?", "get me [name]'s contact info". IMPORTANT: When the previous AI message said something was "not available in the current context" about a specific person and the user asks to find it via internet, that is ALWAYS lookup.
 - generate: user wants content created (outreach, social posts, briefs). Also use this when the message contains clarification answers for content generation (e.g. "Generate outreach content using my clarification answers", or text formatted as "Question: Answer" pairs related to content creation context).
 - content_refine: user wants to MODIFY, EDIT, or IMPROVE already-generated content variants. Use this when content_variants already exist and the user asks to change tone, shorten, rewrite, make more casual/formal, adjust CTAs, change subject lines, or otherwise tweak existing content. Key phrases: "make it more casual", "shorten the emails", "rewrite the subject line", "change the tone", "make it punchier", "adjust the CTA", "refine the content", "edit the variants"
 - deploy: user wants to send content to a channel
@@ -97,7 +100,9 @@ When the user mentions cycles:
 - "Go back to research" → override any prior intent immediately with "research"
 - "Send only to John" or "remove Alice from the list" or "add john@example.com" or "show me the prospects" or "upload a CSV" or "I only want to send to sarah@company.com" → "prospect_manage"
 - "who are we sending to?" or "show selected prospects" → "prospect_manage"
-- "find some prospects" or "can you find prospects?" or "discover prospects" or "search for prospects" or "look up prospects" or "find me some targets" → "prospect_manage"
+- "find some prospects" or "can you find prospects?" or "discover prospects" or "search for prospects" or "find me some targets" → "prospect_manage"
+- "what is [specific person]'s LinkedIn?" or "find [name]'s LinkedIn profile" or "what is his/her username?" or "look up [specific name]" or "can you find it through internet?" (when prior turn was about a specific person) or "search for [name] on LinkedIn" → "lookup"
+- KEY DISTINCTION: lookup = find ONE specific named person. prospect_manage = discover MULTIPLE prospects for the campaign.
 - "configure MCP server" or "add mcp" or "connect brightdata" or any MCP/tool server URL → "mcp_configure"
 - "list mcp servers" or "show connected tools" or "remove mcp server" → "mcp_configure"
 - "proceed to next cycle" or "let's do cycle 2" or "start over with learnings" or "iterate" or "next round" → "refined_cycle"
@@ -116,20 +121,20 @@ When the user mentions cycles:
 
 ## Output format (strict JSON, no prose, no markdown code blocks)
 {{
-  "current_intent": "<one of: research, segment, prospect_manage, generate, content_refine, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
+  "current_intent": "<one of: research, segment, prospect_manage, lookup, generate, content_refine, deploy, feedback, refined_cycle, mcp_configure, answer, update_context, clarify>",
   "reasoning": "<one sentence explaining your classification>",
   "user_directive": "<a clear, actionable summary of WHAT the user wants the next agent to do — capture specific focus areas, constraints, preferences, and tone from the user's message. Examples: 'Research competitor pricing strategies for enterprise SaaS', 'Generate 3 email variants with a casual, friendly tone focused on cost savings', 'Deploy only the ROI-focused variant to top 3 prospects'. This MUST reflect the user's specific request, not a generic description of what the agent does.>",
   "clarification_question": "<only if current_intent=clarify, else null>",
   "clarification_options": ["<option1>", "<option2>", "..."],
-  "next_node": "<research, segment, generate, content_refine, deploy, feedback, refined_cycle, answer, update_context, clarify>"
+  "next_node": "<research, segment, prospect_manage, lookup, generate, content_refine, deploy, feedback, refined_cycle, answer, update_context, clarify>"
 }}"""
 
 DEFAULT_CLARIFICATION = (
     "I didn't quite catch that — could you clarify what you'd like to do? "
-    "(research / segment / manage prospects / generate / refine content / deploy / feedback / configure MCP)"
+    "(research / segment / manage prospects / look up someone / generate / refine content / deploy / feedback / configure MCP)"
 )
 
-DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Generate content", "Refine content", "Deploy campaign", "Report feedback", "Configure MCP server"]
+DEFAULT_OPTIONS = ["Research competitors", "Manage prospects", "Look up a person", "Generate content", "Refine content", "Deploy campaign", "Report feedback", "Configure MCP server"]
 
 
 def _get_llm():
@@ -494,7 +499,9 @@ async def clarify_node(state: CampaignState) -> dict[str, Any]:
 ANSWER_SYSTEM_PROMPT = """You are a helpful assistant for the Signal to Action growth intelligence system.
 
 Answer the user's question directly and concisely using ONLY the campaign context provided below.
-If the information is not available in the context, say so honestly rather than guessing.
+If the information is not available in the context, be honest AND proactively suggest how to get it:
+- If the user is asking about a specific person's LinkedIn profile, email, or contact details that are not in context, say: "That information isn't in the current context. I can search the internet to find it — just say 'find it online' or ask me to look up [name]."
+- If the user is asking for information that requires a web search, suggest they ask for a lookup.
 Do NOT perform research, generate content, or take any actions — just answer the question.
 Keep answers focused and brief (1-3 paragraphs max).
 
@@ -1131,3 +1138,197 @@ Extract context updates from the user's latest message."""
     )
 
     return patch
+
+
+# ---------------------------------------------------------------------------
+# Lookup node — targeted search for a specific named individual
+# ---------------------------------------------------------------------------
+
+LOOKUP_SYSTEM_PROMPT = """You are a research assistant that finds LinkedIn profiles and contact details for specific individuals.
+
+Given the search results below, extract:
+1. LinkedIn profile URL (if found)
+2. LinkedIn username/handle (the part after linkedin.com/in/)
+3. Current job title and company
+4. Any other relevant contact info (email, Twitter, etc.)
+
+Be accurate — only report information that is clearly present in the search results.
+If a LinkedIn URL is found, always extract the username from it.
+Format your response in a clear, conversational way.
+If nothing was found, say so honestly and suggest alternative approaches."""
+
+LOOKUP_EXTRACT_PROMPT = """Extract the person name and any additional context (company, role) from this user message.
+Return JSON only: {{"name": "...", "company": "...", "role": "...", "context": "..."}}
+If company/role/context not mentioned, use null."""
+
+
+async def lookup_node(state: CampaignState) -> dict[str, Any]:
+    """Look up a specific named individual's LinkedIn profile and contact details.
+
+    Does a targeted web search for ONE person rather than bulk prospect discovery.
+    Results are shown inline in chat with an option to add to the prospect list.
+    """
+    from app.agents.prospect_manager import _create_manual_prospect, build_prospect_manager_frame
+    from app.tools.search import search_web
+
+    session_id = state.get("session_id", "unknown")
+    logger.info("lookup_node called | session=%s", session_id)
+
+    # Extract the latest user message
+    messages = state.get("messages", [])
+    user_query = ""
+    for msg in reversed(messages):
+        if hasattr(msg, "type") and msg.type == "human":
+            user_query = msg.content if isinstance(msg.content, str) else str(msg.content)
+            break
+        elif isinstance(msg, dict) and msg.get("role") == "user":
+            user_query = msg.get("content", "")
+            break
+
+    # Also look back at prior messages for context (e.g. user asked about Devinda, then said "find it")
+    prior_context = ""
+    count = 0
+    for msg in reversed(messages):
+        if count >= 6:
+            break
+        if hasattr(msg, "type") and hasattr(msg, "content"):
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            prior_context = f"[{msg.type}]: {content[:300]}\n" + prior_context
+        count += 1
+
+    llm = _get_llm()
+    ui_frames: list[dict[str, Any]] = []
+
+    # Step 1: Extract person name from user query + prior context
+    person_name = ""
+    company_hint = ""
+    if llm:
+        try:
+            extract_response = await llm.ainvoke([
+                {"role": "system", "content": LOOKUP_EXTRACT_PROMPT},
+                {"role": "user", "content": f"Recent conversation:\n{prior_context}\n\nLatest message: {user_query}"},
+            ])
+            extracted = _parse_llm_response(extract_response.content)
+            person_name = extracted.get("name") or ""
+            company_hint = extracted.get("company") or ""
+        except Exception as e:
+            logger.warning("lookup_node: name extraction failed: %s", e)
+
+    if not person_name:
+        # Fallback: try to pull a name from user_directive or the query itself
+        directive = state.get("user_directive") or ""
+        person_name = directive or user_query
+
+    # Step 2: Build targeted search queries
+    search_queries = []
+    if person_name:
+        base = person_name.strip()
+        if company_hint:
+            base = f"{base} {company_hint}"
+        search_queries = [
+            f"{base} LinkedIn profile",
+            f"site:linkedin.com/in {base}",
+        ]
+    else:
+        search_queries = [user_query]
+
+    # Step 3: Run searches
+    all_results: list[dict] = []
+    for query in search_queries[:2]:
+        try:
+            results = await search_web(query, max_results=5, recency_days=365)
+            all_results.extend(results)
+        except Exception as e:
+            logger.warning("lookup_node: search failed for %r: %s", query, e)
+
+    # Step 4: Extract LinkedIn info using LLM
+    linkedin_url = ""
+    linkedin_username = ""
+    found_prospect: dict[str, Any] | None = None
+
+    if all_results and llm:
+        results_text = "\n\n".join(
+            f"URL: {r.get('url', '')}\nTitle: {r.get('title', '')}\nSnippet: {r.get('content', '')[:400]}"
+            for r in all_results[:8]
+        )
+        try:
+            lookup_response = await llm.ainvoke([
+                {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
+                {"role": "user", "content": f"I'm looking for: {person_name or user_query}\n\nSearch results:\n{results_text}"},
+            ])
+            answer_text = lookup_response.content
+
+            # Try to extract LinkedIn URL for prospect card
+            import re as _re
+            li_match = _re.search(r"linkedin\.com/in/([\w\-]+)", results_text + answer_text)
+            if li_match:
+                linkedin_username = li_match.group(1)
+                linkedin_url = f"https://www.linkedin.com/in/{linkedin_username}"
+
+        except Exception as e:
+            logger.error("lookup_node: LLM synthesis failed: %s", e)
+            answer_text = f"I searched for **{person_name or user_query}** but encountered an error synthesizing the results. Please try again."
+    elif not all_results:
+        answer_text = (
+            f"I searched for **{person_name or user_query}** but couldn't find any results. "
+            "Try providing more context like their company name or job title."
+        )
+    else:
+        # No LLM — return raw results
+        answer_text = f"Found {len(all_results)} search results for **{person_name or user_query}**:\n\n"
+        for r in all_results[:3]:
+            answer_text += f"- [{r.get('title', 'Link')}]({r.get('url', '')})\n"
+
+    # Step 5: Build response frame
+    instance_id = f"lookup_{uuid4().hex[:8]}"
+    text_frame = UIFrame(
+        type="text",
+        component="MessageRenderer",
+        instance_id=instance_id,
+        props={"content": answer_text, "role": "assistant"},
+        actions=[],
+    ).model_dump()
+    ui_frames.append(text_frame)
+
+    # Step 6: If we found a LinkedIn profile, offer to add to prospect list
+    if linkedin_url and person_name:
+        found_prospect = _create_manual_prospect({
+            "name": person_name,
+            "linkedin_url": linkedin_url,
+            "company": company_hint or "",
+        })
+        offer_frame = UIFrame(
+            type="ui_component",
+            component="ProspectManager",
+            instance_id=f"lookup-prospect-{session_id[:8]}-{uuid4().hex[:4]}",
+            props={
+                "prospects": [found_prospect],
+                "selected_ids": [found_prospect["id"]],
+                "message": f"Found {person_name}'s LinkedIn profile. Add to prospect list?",
+                "show_csv_upload": False,
+                "total_count": 1,
+                "selected_count": 1,
+            },
+            actions=[
+                UIAction(
+                    id="confirm-prospects",
+                    label="Add to prospect list",
+                    action_type="confirm_prospects",
+                    payload={},
+                ),
+            ],
+        ).model_dump()
+        ui_frames.append(offer_frame)
+
+    logger.info(
+        "lookup_node completed | session=%s person=%r linkedin=%r",
+        session_id,
+        person_name,
+        linkedin_url,
+    )
+
+    return {
+        "active_stage_summary": f"looked up {person_name or 'person'}",
+        "session_complete": True,
+        "pending_ui_frames": ui_frames,
+    }
