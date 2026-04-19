@@ -93,6 +93,7 @@ async def _request(
     *,
     params: dict[str, Any] | None = None,
     files: list[tuple[str, tuple[None, str]]] | None = None,
+    json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Perform a Unipile API request and return the parsed JSON body."""
     async with httpx.AsyncClient(
@@ -100,7 +101,9 @@ async def _request(
         headers=_build_headers(),
         timeout=_TIMEOUT_SECONDS,
     ) as client:
-        response = await client.request(method, path, params=params, files=files)
+        response = await client.request(
+            method, path, params=params, files=files, json=json_body
+        )
         if response.is_error:
             logger.error(
                 "Unipile API %s %s → HTTP %s: %s",
@@ -281,14 +284,14 @@ async def send_connection_request(
     if not resolved_account_id:
         raise ValueError("UNIPILE_LINKEDIN_ACCOUNT_ID is not set.")
 
-    files: list[tuple[str, tuple[None, str]]] = [
-        ("account_id", (None, resolved_account_id)),
-        ("provider_id", (None, provider_id)),
-    ]
+    body: dict[str, Any] = {
+        "account_id": resolved_account_id,
+        "provider_id": provider_id,
+    }
     if message:
-        files.append(("message", (None, message)))
+        body["message"] = message
 
-    return await _request("POST", "/api/v1/users/invite", files=files)
+    return await _request("POST", "/api/v1/users/invite", json_body=body)
 
 
 async def send_linkedin_message_direct(
