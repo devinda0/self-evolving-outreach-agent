@@ -214,13 +214,30 @@ async def _dispatch_send(
         return None, f"Unsupported outbound channel '{channel}'."
 
     except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        try:
+            body = exc.response.text[:300].strip()
+        except Exception:
+            body = ""
+        if status_code == 403:
+            detail = (
+                f"LinkedIn rejected the message (403 Forbidden). "
+                "The recipient may not be a 1st-degree connection or may have messaging restrictions."
+            )
+            if body:
+                detail += f" Provider response: {body}"
+        else:
+            detail = f"Provider returned HTTP {status_code}"
+            if body:
+                detail += f": {body}"
         logger.error(
-            "_dispatch_send provider HTTP error prospect=%s channel=%s status=%s",
+            "_dispatch_send provider HTTP error prospect=%s channel=%s status=%s body=%s",
             prospect.get("id"),
             channel,
-            exc.response.status_code,
+            status_code,
+            body,
         )
-        return None, str(exc)
+        return None, detail
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "_dispatch_send unexpected error prospect=%s channel=%s: %s",
@@ -288,14 +305,43 @@ def build_deployment_confirm_frame(
 def build_delivery_status_frame(
     deployment_records: list[dict],
     instance_id: str,
+    *,
+    assignments: list[dict] | None = None,
 ) -> dict:
     """Build a DeliveryStatusCard UI frame showing results after all sends complete."""
+    sent_records = [r for r in deployment_records if r.get("status") == "sent"]
+    failed_records = [r for r in deployment_records if r.get("status") == "failed"]
+
+    prospect_names: dict[str, str] = {}
+    if assignments:
+        for a in assignments:
+            p = a.get("prospect") or {}
+            pid = p.get("id")
+            if pid:
+                prospect_names[pid] = p.get("name") or pid
+
+    channel_data: dict[str, dict] = {}
+    for r in deployment_records:
+        ch = r.get("channel", "email")
+        if ch not in channel_data:
+            channel_data[ch] = {"channel": ch, "sent": 0, "failed": 0, "failed_recipients": []}
+        if r.get("status") == "sent":
+            channel_data[ch]["sent"] += 1
+        else:
+            channel_data[ch]["failed"] += 1
+            pid = r.get("prospect_id", "")
+            name = prospect_names.get(pid, pid)
+            if name:
+                channel_data[ch]["failed_recipients"].append(name)
+
     return UIFrame(
         type="ui_component",
         component="DeliveryStatusCard",
         instance_id=instance_id,
         props={
-            "total_sent": len(deployment_records),
+            "total_sent": len(sent_records),
+            "failed": len(failed_records),
+            "breakdown": list(channel_data.values()),
             "records": [
                 {
                     "id": r.get("id"),
@@ -305,15 +351,22 @@ def build_delivery_status_frame(
                     "ab_cohort": r.get("ab_cohort"),
                     "provider_message_id": r.get("provider_message_id"),
                     "status": r.get("status", "sent"),
+                    "error_detail": r.get("error_detail"),
                 }
                 for r in deployment_records
             ],
         },
         actions=[
             UIAction(
-                id="view-details",
-                label="View deployment details",
-                action_type="view_deployment_details",
+                id="view-results",
+                label="View Results Later",
+                action_type="view_results",
+                payload={},
+            ),
+            UIAction(
+                id="run-next-cycle",
+                label="Run Next Cycle",
+                action_type="run_next_cycle",
                 payload={},
             ),
         ],
@@ -670,6 +723,7 @@ async def deployment_agent_node(state: CampaignState) -> dict:
     status_frame = build_delivery_status_frame(
         deployment_records,
         f"delivery-status-{session_id[:8]}",
+        assignments=ab_plan.get("assignments", []),
     )
 
     # Build post-deployment response message

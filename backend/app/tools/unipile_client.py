@@ -86,6 +86,14 @@ async def _request(
         timeout=_TIMEOUT_SECONDS,
     ) as client:
         response = await client.request(method, path, params=params, files=files)
+        if response.is_error:
+            logger.error(
+                "Unipile API %s %s → HTTP %s: %s",
+                method,
+                path,
+                response.status_code,
+                response.text[:300],
+            )
         response.raise_for_status()
     if not response.content:
         return {}
