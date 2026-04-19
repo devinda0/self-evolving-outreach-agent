@@ -288,11 +288,7 @@ async def send_connection_request(
     if message:
         files.append(("message", (None, message)))
 
-    return await _request(
-        "POST",
-        f"/api/v1/users/{quote(provider_id, safe='')}/relation",
-        files=files,
-    )
+    return await _request("POST", "/api/v1/users/invite", files=files)
 
 
 async def send_linkedin_message_direct(
