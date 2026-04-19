@@ -31,9 +31,10 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
     (frame.props.caption as string) ??
     (frame.props.caption_preview as string) ??
     "";
-  const isPendingAction = useCampaignStore((s) => s.isPendingAction);
+  const wsStatus = useCampaignStore((s) => s.wsStatus);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isCapturingImage, setIsCapturingImage] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   const confirmAction = frame.actions.find(
@@ -61,6 +62,23 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
     setTimeout(resize, 600);
   }, [html]);
 
+  useEffect(() => {
+    // The previous composer action can leave the global pending flag set
+    // briefly even after the confirm frame arrives. Reset here so this frame
+    // never inherits a stale "Publishing..." state.
+    useCampaignStore.getState().setPendingAction(false);
+    useCampaignStore.getState().setWaitingForResponse(false);
+    setIsSubmitting(false);
+    setCaptureError(null);
+  }, [frame.instance_id]);
+
+  useEffect(() => {
+    if (wsStatus !== "disconnected") return;
+    if (!isSubmitting) return;
+    setIsSubmitting(false);
+    setCaptureError("Connection lost while publishing. Please retry.");
+  }, [isSubmitting, wsStatus]);
+
   async function handleConfirm() {
     const id = confirmAction?.id ?? "confirm_linkedin_post";
     setCaptureError(null);
@@ -82,6 +100,7 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
         html,
         flyer_image_data_url: flyerImageDataUrl,
       });
+      setIsSubmitting(true);
     } catch {
       setCaptureError("Couldn't prepare the flyer image. Please try again.");
     } finally {
@@ -192,16 +211,16 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
         <button
           type="button"
           className="btn-ghost"
-          disabled={isPendingAction || isCapturingImage}
+          disabled={isSubmitting || isCapturingImage}
           onClick={handleCancel}
-          style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center", gap: "6px", opacity: isPendingAction || isCapturingImage ? 0.5 : undefined }}
+          style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center", gap: "6px", opacity: isSubmitting || isCapturingImage ? 0.5 : undefined }}
         >
           <ArrowLeftIcon />
           Go Back &amp; Edit
         </button>
         <button
           type="button"
-          disabled={isPendingAction || isCapturingImage}
+          disabled={isSubmitting || isCapturingImage}
           onClick={handleConfirm}
           style={{
             fontSize: "12px",
@@ -210,15 +229,15 @@ export default function LinkedInPostConfirm({ frame, onAction }: Props) {
             background: "#0a66c2",
             color: "#fff",
             border: "none",
-            cursor: isPendingAction || isCapturingImage ? "not-allowed" : "pointer",
+            cursor: isSubmitting || isCapturingImage ? "not-allowed" : "pointer",
             fontWeight: 600,
-            opacity: isPendingAction || isCapturingImage ? 0.6 : 1,
+            opacity: isSubmitting || isCapturingImage ? 0.6 : 1,
             display: "flex",
             alignItems: "center",
             gap: "6px",
           }}
         >
-          {isPendingAction || isCapturingImage ? (
+          {isSubmitting || isCapturingImage ? (
             <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Publishing…</>
           ) : (
             "Confirm & Publish"
