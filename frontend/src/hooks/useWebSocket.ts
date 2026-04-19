@@ -78,9 +78,15 @@ export function useWebSocket(sessionId: string | null) {
     };
 
     ws.onclose = () => {
-      useCampaignStore.getState().setWsStatus("disconnected");
-      useCampaignStore.getState().setStreaming(false);
-      useCampaignStore.getState().setWaitingForResponse(false);
+      const store = useCampaignStore.getState();
+      const hadPendingWork = store.isPendingAction || store.isWaitingForResponse;
+      store.setWsStatus("disconnected");
+      store.setStreaming(false);
+      store.setPendingAction(false);
+      store.setWaitingForResponse(false);
+      if (hadPendingWork) {
+        store.addErrorMessage("Connection lost while processing the request. Please retry.");
+      }
       // Auto-reconnect
       reconnectTimer.current = setTimeout(() => {
         connect();
@@ -101,11 +107,25 @@ export function useWebSocket(sessionId: string | null) {
   }, [connect]);
 
   const sendMessage = useCallback((text: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      const store = useCampaignStore.getState();
+      store.setPendingAction(false);
+      store.setWaitingForResponse(false);
+      store.addErrorMessage("Connection is not ready. Please retry in a moment.");
+      return;
+    }
     wsRef.current?.send(JSON.stringify({ type: "user_message", content: text }));
   }, []);
 
   const sendUIAction = useCallback(
     (instanceId: string, actionId: string, payload: Record<string, unknown> = {}) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        const store = useCampaignStore.getState();
+        store.setPendingAction(false);
+        store.setWaitingForResponse(false);
+        store.addErrorMessage("Connection is not ready. Please retry in a moment.");
+        return;
+      }
       wsRef.current?.send(
         JSON.stringify({
           type: "ui_action",
