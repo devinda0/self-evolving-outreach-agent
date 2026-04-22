@@ -20,6 +20,9 @@ interface Props {
   onAction: (instanceId: string, actionId: string, payload: Record<string, unknown>) => void;
 }
 
+const EMPTY_PROSPECTS: Prospect[] = [];
+const EMPTY_SELECTED_IDS: string[] = [];
+
 // ---------- small sub-components ----------
 
 function ScoreBar({ value, color }: { value: number; color: string }) {
@@ -104,8 +107,8 @@ function Pill({
 // ---------- main component ----------
 
 export default function ProspectPicker({ frame, onAction }: Props) {
-  const prospects = (frame.props.prospects as Prospect[]) ?? [];
-  const initialSelected = (frame.props.selected_ids as string[]) ?? [];
+  const prospects = (frame.props.prospects as Prospect[] | undefined) ?? EMPTY_PROSPECTS;
+  const initialSelected = (frame.props.selected_ids as string[] | undefined) ?? EMPTY_SELECTED_IDS;
 
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSelected));
   const [titleFilter, setTitleFilter] = useState("");

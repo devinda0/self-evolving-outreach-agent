@@ -75,7 +75,7 @@ const EVENT_TYPE_OPTIONS: { value: EventType; label: string; color: string }[] =
 // Component
 // ---------------------------------------------------------------------------
 
-export default function ManualFeedbackInput({ frame, onAction: _onAction }: Props) {
+export default function ManualFeedbackInput({ frame }: Props) {
   const variants = (frame.props.variants as VariantOption[]) ?? [];
   const sessionId = useCampaignStore((s) => s.sessionId);
 

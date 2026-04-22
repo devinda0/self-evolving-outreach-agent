@@ -57,54 +57,58 @@ export function useWebSocket(sessionId: string | null) {
     [],
   );
 
-  const connect = useCallback(() => {
+  useEffect(() => {
     if (!sessionId) return;
 
-    useCampaignStore.getState().setWsStatus("connecting");
-    const ws = new WebSocket(`${WS_URL}/ws/campaign/${sessionId}`);
-    wsRef.current = ws;
+    let isActive = true;
 
-    ws.onopen = () => {
-      useCampaignStore.getState().setWsStatus("connected");
+    const connect = () => {
+      if (!isActive) return;
+
+      useCampaignStore.getState().setWsStatus("connecting");
+      const ws = new WebSocket(`${WS_URL}/ws/campaign/${sessionId}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        useCampaignStore.getState().setWsStatus("connected");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const frame: WsFrame = JSON.parse(event.data as string);
+          dispatch(frame);
+        } catch {
+          // ignore malformed frames
+        }
+      };
+
+      ws.onclose = () => {
+        const store = useCampaignStore.getState();
+        const hadPendingWork = store.isPendingAction || store.isWaitingForResponse;
+        store.setWsStatus("disconnected");
+        store.setStreaming(false);
+        store.setPendingAction(false);
+        store.setWaitingForResponse(false);
+        if (hadPendingWork) {
+          store.addErrorMessage("Connection lost while processing the request. Please retry.");
+        }
+        if (!isActive) return;
+        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
     };
 
-    ws.onmessage = (event) => {
-      try {
-        const frame: WsFrame = JSON.parse(event.data as string);
-        dispatch(frame);
-      } catch {
-        // ignore malformed frames
-      }
-    };
-
-    ws.onclose = () => {
-      const store = useCampaignStore.getState();
-      const hadPendingWork = store.isPendingAction || store.isWaitingForResponse;
-      store.setWsStatus("disconnected");
-      store.setStreaming(false);
-      store.setPendingAction(false);
-      store.setWaitingForResponse(false);
-      if (hadPendingWork) {
-        store.addErrorMessage("Connection lost while processing the request. Please retry.");
-      }
-      // Auto-reconnect
-      reconnectTimer.current = setTimeout(() => {
-        connect();
-      }, RECONNECT_DELAY_MS);
-    };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-  }, [sessionId, dispatch]);
-
-  useEffect(() => {
     connect();
+
     return () => {
+      isActive = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
     };
-  }, [connect]);
+  }, [sessionId, dispatch]);
 
   const sendMessage = useCallback((text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {

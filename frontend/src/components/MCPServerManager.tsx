@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -70,7 +70,7 @@ export default function MCPServerManager({ onClose }: { onClose: () => void }) {
   // Testing
   const [testResult, setTestResult] = useState<{ success: boolean; tools_discovered?: number; tools?: { name: string; description: string }[]; error?: string } | null>(null);
 
-  const fetchServers = useCallback(async () => {
+  const refreshServers = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/mcp/servers`);
       if (res.ok) setServers(await res.json());
@@ -79,29 +79,47 @@ export default function MCPServerManager({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  const fetchTemplates = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/mcp/templates`);
-      if (res.ok) {
-        const data = await res.json();
-        setTemplates(data.categories ?? {});
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
   useEffect(() => {
-    fetchServers();
-    fetchTemplates();
-  }, [fetchServers, fetchTemplates]);
+    let isActive = true;
+
+    async function loadInitialData() {
+      try {
+        const [serversRes, templatesRes] = await Promise.all([
+          fetch(`${API_BASE}/mcp/servers`),
+          fetch(`${API_BASE}/mcp/templates`),
+        ]);
+
+        if (serversRes.ok) {
+          const data: MCPServer[] = await serversRes.json();
+          if (isActive) {
+            setServers(data);
+          }
+        }
+
+        if (templatesRes.ok) {
+          const data = await templatesRes.json();
+          if (isActive) {
+            setTemplates(data.categories ?? {});
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    void loadInitialData();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   // -- Server list actions --
 
   async function toggleServer(s: MCPServer) {
     const endpoint = s.status === "running" ? "stop" : "start";
     await fetch(`${API_BASE}/mcp/servers/${s.server_id}/${endpoint}`, { method: "POST" });
-    await fetchServers();
+    await refreshServers();
   }
 
   async function removeServer(serverId: string) {
@@ -176,7 +194,7 @@ export default function MCPServerManager({ onClose }: { onClose: () => void }) {
         setTestResult(tr);
       }
 
-      await fetchServers();
+      await refreshServers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setTestResult({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
