@@ -1,12 +1,12 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from app.agents.linkedin_post_agent import build_linkedin_post_confirm_frame
 from app.api.campaign import (
     _load_active_campaign_state,
     _state_delta_before_rerun,
     _sync_prospect_manager_ui_action,
 )
-from app.agents.linkedin_post_agent import build_linkedin_post_confirm_frame
 
 
 async def test_load_active_campaign_state_hydrates_saved_variants():

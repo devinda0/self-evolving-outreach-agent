@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, Sequence, TypeAlias
 from urllib.parse import quote
 
 import httpx
@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 20.0
 _LINKEDIN_IDENTIFIER_RE = re.compile(r"linkedin\.com/(?:in|company)/([^/?#]+)", re.IGNORECASE)
+MultipartFormPart: TypeAlias = (
+    tuple[str, tuple[None, str]] | tuple[str, tuple[str, bytes, str]]
+)
 
 
 class LinkedInConnectionRequiredError(Exception):
@@ -92,7 +95,7 @@ async def _request(
     path: str,
     *,
     params: dict[str, Any] | None = None,
-    files: list[tuple[str, tuple[Any, ...]]] | None = None,
+    files: Sequence[MultipartFormPart] | None = None,
     json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Perform a Unipile API request and return the parsed JSON body."""
@@ -395,7 +398,7 @@ async def create_linkedin_post(
         raise ValueError(" | ".join(config_errors))
 
     resolved_account_id = account_id or settings.UNIPILE_LINKEDIN_ACCOUNT_ID
-    files = [
+    files: list[MultipartFormPart] = [
         ("account_id", (None, resolved_account_id)),
         ("text", (None, text)),
     ]

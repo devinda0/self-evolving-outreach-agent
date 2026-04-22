@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage
@@ -23,6 +23,7 @@ from app.db.crud import (
     save_campaign_state,
     save_prospect_cards,
 )
+from app.models.campaign_state import CampaignState
 
 logger = logging.getLogger(__name__)
 
@@ -495,7 +496,7 @@ async def _handle_confirm_linkedin_post_action(
     }
 
     try:
-        result = await _publish_post(publish_state, session_id)
+        result = await _publish_post(cast(CampaignState, publish_state), session_id)
     except Exception:
         logger.exception("LinkedIn direct publish failed | session=%s", session_id)
         await _send_json_safe(websocket, {"type": "error", "message": "LinkedIn publish failed."})
